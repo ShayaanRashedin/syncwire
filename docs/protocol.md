@@ -45,6 +45,16 @@ format because it may contain padding and uses host byte order.
 
 Payload schemas and message-order rules will be specified as their vertical slices are added.
 
+## PING/PONG exchange
+
+`PING` and `PONG` have no payload and must use `transfer_id = 0`. The client chooses a nonzero
+`request_id`; the server returns the same value in its `PONG`. A zero request ID, nonempty payload,
+nonzero transfer ID, wrong message type, or mismatched response ID makes the exchange invalid.
+
+The blocking reference implementation reads exactly one complete frame and serves one client.
+This deliberately isolates protocol correctness and partial-I/O behavior before non-blocking
+connection management is introduced.
+
 ## Incremental parsing
 
 For each connection, the receiver:
