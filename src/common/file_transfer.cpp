@@ -560,12 +560,11 @@ FileTransferResult receive_file(const int client_fd,
     if (!sent_result.ok()) {
         return frame_error(sent_result);
     }
-    return FileTransferResult{
-        .status = FileTransferStatus::Success,
-        .transferred = offset,
-        .expected_checksum = metadata.checksum,
-        .actual_checksum = actual_checksum,
-    };
+    FileTransferResult result;
+    result.transferred = offset;
+    result.expected_checksum = metadata.checksum;
+    result.actual_checksum = actual_checksum;
+    return result;
 }
 
 std::string_view file_transfer_status_message(const FileTransferStatus status) noexcept {
@@ -613,3 +612,4 @@ std::string_view file_transfer_status_message(const FileTransferStatus status) n
 }
 
 } // namespace syncwire::protocol
+
