@@ -38,9 +38,21 @@ backpressure, resumable transfers, and failure handling.
   checksum failures;
 - end-to-end socket tests for successful multi-chunk upload and failure cleanup.
 
-The implementation remains deliberately single-client and blocking. This makes the transfer
-state machine independently testable before it is moved behind non-blocking sockets, `epoll`,
-per-connection state, and output queues.
+### 4. Incremental directory synchronization
+
+- recursive source and destination scans with sorted relative-path manifests;
+- per-file size and CRC-32 metadata with bounded entry and payload counts;
+- a manifest/plan exchange that uploads only missing or changed files;
+- multiple verified file transfers over one TCP connection;
+- safe nested destination paths with symlink-parent rejection;
+- a second destination scan that verifies the source state after all planned uploads;
+- explicit unchanged and server-only counts; server-only files are preserved by design;
+- symlinks are skipped rather than followed during recursive scans;
+- end-to-end tests for recursive upload, zero-work repeat sync, and symlink containment.
+
+The implementation remains deliberately single-client and blocking. This makes synchronization
+decisions independently testable before the session is moved behind non-blocking sockets,
+`epoll`, per-connection state, and output queues.
 
 ## Build on Ubuntu or Debian
 
@@ -82,6 +94,21 @@ The remote name is optional and defaults to the source basename. It must be a pl
 directory components are intentionally rejected in this slice. A successful server commits the
 file only after its declared size and CRC-32 match.
 
+To synchronize a directory tree, prepare a source and restart the server:
+
+```bash
+mkdir -p /tmp/syncwire-source/nested
+printf 'alpha\n' > /tmp/syncwire-source/a.txt
+printf 'beta\n' > /tmp/syncwire-source/nested/b.txt
+
+./build/debug/syncwire-server 4040 received
+./build/debug/syncwire-client 127.0.0.1 4040 sync /tmp/syncwire-source 100
+```
+
+Run the server and client again with a new request ID. Unchanged source files should be reported
+without being uploaded. Files that exist only on the server are counted and preserved; deletion
+semantics require an explicit future opt-in and are not part of this slice.
+
 You can also build without presets:
 
 ```bash
@@ -97,6 +124,7 @@ ctest --test-dir build --output-on-failure
 - Frame and buffer sizes are bounded before allocation or dispatch.
 - Upload filenames are basenames, file chunks are contiguous, and incomplete files are never
   exposed at their final path.
+- Directory synchronization never follows symlinks and never deletes server-only files.
 - The parser retains incomplete data across reads and may emit multiple frames per read.
 - A protocol parsing error is terminal for that parser/connection.
 - Advanced transfer features are added only after the previous vertical slice is tested.

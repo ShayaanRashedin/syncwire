@@ -41,8 +41,8 @@ enum class FileTransferStatus {
 struct FileTransferResult {
     FileTransferStatus status{FileTransferStatus::Success};
     FrameIoResult frame_io;
-    std::optional<TransferCodecError> codec_error;
-    std::optional<TransferResultCode> remote_code;
+    std::optional<TransferCodecError> codec_error{};
+    std::optional<TransferResultCode> remote_code{};
     std::uint64_t transferred{0U};
     std::uint32_t expected_checksum{0U};
     std::uint32_t actual_checksum{0U};

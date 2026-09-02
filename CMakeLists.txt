@@ -12,12 +12,15 @@ option(SYNCWIRE_BUILD_TESTS "Build SyncWire tests" ON)
 add_library(syncwire_common
     src/common/codec.cpp
     src/common/crc32.cpp
+    src/common/directory_manifest.cpp
+    src/common/directory_sync.cpp
     src/common/file_transfer.cpp
     src/common/frame_io.cpp
     src/common/frame_parser.cpp
     src/common/ping_pong.cpp
     src/common/socket_io.cpp
     src/common/tcp_socket.cpp
+    src/common/sync_codec.cpp
     src/common/transfer_codec.cpp
 )
 
@@ -78,6 +81,7 @@ if(SYNCWIRE_BUILD_TESTS)
         tests/unit/ping_pong_tests.cpp
         tests/unit/transfer_codec_tests.cpp
         tests/unit/file_transfer_tests.cpp
+        tests/unit/directory_sync_tests.cpp
     )
     target_link_libraries(syncwire_unit_tests PRIVATE SyncWire::common Threads::Threads)
     target_compile_features(syncwire_unit_tests PRIVATE cxx_std_20)
@@ -99,4 +103,3 @@ if(SYNCWIRE_BUILD_TESTS)
 
     add_test(NAME syncwire_unit_tests COMMAND syncwire_unit_tests)
 endif()
-

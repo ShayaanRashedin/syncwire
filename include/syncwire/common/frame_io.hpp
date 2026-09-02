@@ -23,7 +23,7 @@ struct FrameIoResult {
     FrameIoStatus status{FrameIoStatus::Complete};
     std::size_t transferred{0U};
     int system_error{0};
-    std::optional<CodecError> codec_error;
+    std::optional<CodecError> codec_error{};
 
     [[nodiscard]] bool ok() const noexcept {
         return status == FrameIoStatus::Complete;
@@ -40,4 +40,3 @@ receive_frame(int fd, std::uint32_t max_payload = kDefaultMaxPayload);
 [[nodiscard]] std::string_view frame_io_status_message(FrameIoStatus status) noexcept;
 
 } // namespace syncwire::protocol
-

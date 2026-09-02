@@ -41,6 +41,10 @@ format because it may contain padding and uses host byte order.
 | `0x24` | `ACKNOWLEDGMENT` | Reports the next expected upload offset |
 | `0x25` | `TRANSFER_COMPLETE` | Sender reports end of bytes |
 | `0x26` | `TRANSFER_RESULT` | Receiver reports verification/commit status |
+| `0x30` | `SYNC_MANIFEST` | Client describes a recursive source tree |
+| `0x31` | `SYNC_PLAN` | Server requests missing or changed paths |
+| `0x32` | `SYNC_COMPLETE` | Client reports all planned uploads complete |
+| `0x33` | `SYNC_RESULT` | Server reports post-upload verification status |
 | `0x7f` | `ERROR` | Reports a structured protocol/operation error |
 
 Authentication and download payloads remain reserved for later slices. The upload payloads and
@@ -134,6 +138,55 @@ The server creates an exclusive hidden `.part` file inside the destination direc
 only contiguous bytes to it. After `TRANSFER_COMPLETE`, it checks size and CRC-32, calls
 `fsync()`, closes the file, and renames it to the requested basename on the same filesystem.
 Failures remove the part file and leave the final destination untouched.
+
+## Directory synchronization exchange
+
+Directory synchronization reuses the verified upload exchange for each file selected by the
+server. The client chooses one nonzero synchronization request ID. Control frames use that ID and
+`transfer_id = 0`; planned uploads use consecutive request IDs beginning at
+`sync_request_id + 1`.
+
+The message order is:
+
+1. Client recursively scans its source and sends `SYNC_MANIFEST`.
+2. Server scans its destination and sends `SYNC_PLAN`.
+3. Client performs one complete upload exchange for every planned path, in plan order.
+4. Client sends an empty `SYNC_COMPLETE`.
+5. Server scans the destination again, verifies every source file, and sends `SYNC_RESULT`.
+
+Manifests and plans are strictly sorted by normalized relative path. Duplicates, unsorted paths,
+absolute paths, empty components, `.`, `..`, backslashes, and NUL bytes are invalid. Scanners do
+not follow symlinks. The receiver also rejects an upload when any existing destination parent is
+a symlink, preventing a nested path from escaping the configured root.
+
+### `SYNC_MANIFEST` payload
+
+The payload begins with a 4-byte big-endian file count. Each record then contains:
+
+| Size | Field | Rule |
+| ---: | --- | --- |
+| 8 | File size | Big-endian |
+| 4 | CRC-32 | Big-endian |
+| 2 | Relative path length | Big-endian; `1..1024` |
+| variable | Relative path | Normalized UTF-8-compatible path bytes |
+
+The default limits are 4,096 regular files, 1 GiB per file, and the general 1 MiB frame payload.
+The sender rejects a tree whose encoded manifest exceeds those limits.
+
+### `SYNC_PLAN` payload
+
+The first 12 bytes contain three big-endian 32-bit counts: paths to upload, unchanged source
+files, and files found only on the server. Each upload path is encoded as a 2-byte length followed
+by its path bytes. The paths are strictly sorted and must all exist in the source manifest.
+
+A path is unchanged only when both its size and CRC-32 match. Missing paths and paths with either
+value changed are uploaded. Server-only paths are reported but never deleted in v1.
+
+### `SYNC_COMPLETE` and `SYNC_RESULT`
+
+`SYNC_COMPLETE` has no payload. `SYNC_RESULT` contains one byte: `0` for successful destination
+verification or `1` when a post-upload scan still differs from the source manifest. Server-only
+files do not cause verification failure.
 
 ## Incremental parsing
 

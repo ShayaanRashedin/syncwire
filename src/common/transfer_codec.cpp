@@ -85,18 +85,42 @@ void append_u64(std::vector<std::byte>& output, const std::uint64_t value) {
 } // namespace
 
 bool is_safe_remote_filename(const std::string_view filename) noexcept {
-    if (filename.empty() || filename.size() > kMaxRemoteFilenameLength || filename == "." ||
-        filename == "..") {
+    return filename.size() <= kMaxRemoteFilenameLength &&
+           is_safe_remote_path(filename) && filename.find('/') == std::string_view::npos;
+}
+
+bool is_safe_remote_path(const std::string_view path) noexcept {
+    if (path.empty() || path.size() > kMaxRemotePathLength || path.front() == '/' ||
+        path.back() == '/') {
         return false;
     }
-    return std::ranges::none_of(filename, [](const char character) {
-        return character == '/' || character == '\\' || character == '\0';
-    });
+    if (std::ranges::any_of(path, [](const char character) {
+            return character == '\\' || character == '\0';
+        })) {
+        return false;
+    }
+
+    std::size_t start = 0U;
+    while (start < path.size()) {
+        const auto separator = path.find('/', start);
+        const auto length = separator == std::string_view::npos
+                                ? path.size() - start
+                                : separator - start;
+        const auto component = path.substr(start, length);
+        if (component.empty() || component == "." || component == "..") {
+            return false;
+        }
+        if (separator == std::string_view::npos) {
+            break;
+        }
+        start = separator + 1U;
+    }
+    return true;
 }
 
 std::vector<std::byte> encode_upload_metadata(const UploadMetadata& metadata) {
     std::vector<std::byte> payload;
-    if (!is_safe_remote_filename(metadata.filename)) {
+    if (!is_safe_remote_path(metadata.filename)) {
         return payload;
     }
     payload.reserve(kUploadMetadataPrefixSize + metadata.filename.size());
@@ -117,7 +141,7 @@ UploadMetadataResult decode_upload_metadata(const std::span<const std::byte> pay
     if (filename_length == 0U) {
         return TransferCodecError::EmptyFilename;
     }
-    if (filename_length > kMaxRemoteFilenameLength) {
+    if (filename_length > kMaxRemotePathLength) {
         return TransferCodecError::FilenameTooLong;
     }
     if (payload.size() != kUploadMetadataPrefixSize + filename_length) {
@@ -130,7 +154,7 @@ UploadMetadataResult decode_upload_metadata(const std::span<const std::byte> pay
         filename.push_back(
             static_cast<char>(get_u8(payload, kUploadMetadataPrefixSize + index)));
     }
-    if (!is_safe_remote_filename(filename)) {
+    if (!is_safe_remote_path(filename)) {
         return TransferCodecError::UnsafeFilename;
     }
 

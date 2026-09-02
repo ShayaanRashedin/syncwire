@@ -9,5 +9,6 @@ int main() {
     run_ping_pong_tests(runner);
     run_transfer_codec_tests(runner);
     run_file_transfer_tests(runner);
+    run_directory_sync_tests(runner);
     return runner.finish();
 }

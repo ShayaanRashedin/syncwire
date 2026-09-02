@@ -214,6 +214,68 @@ namespace {
     return TransferResultCode::InvalidRequest;
 }
 
+struct PreparedDestination {
+    std::filesystem::path final_path;
+    std::filesystem::path part_path;
+    int system_error{0};
+    bool invalid_path{false};
+
+    [[nodiscard]] bool ok() const noexcept {
+        return !final_path.empty() && !part_path.empty();
+    }
+};
+
+[[nodiscard]] PreparedDestination
+prepare_destination(const std::filesystem::path& root,
+                    const std::string_view remote_path,
+                    const std::uint64_t transfer_id) {
+    PreparedDestination prepared;
+    std::error_code error;
+
+    const auto root_status = std::filesystem::symlink_status(root, error);
+    if (error) {
+        prepared.system_error = error.value();
+        return prepared;
+    }
+    if (std::filesystem::exists(root_status)) {
+        if (std::filesystem::is_symlink(root_status) ||
+            !std::filesystem::is_directory(root_status)) {
+            prepared.invalid_path = true;
+            return prepared;
+        }
+    } else if (!std::filesystem::create_directories(root, error) && error) {
+        prepared.system_error = error.value();
+        return prepared;
+    }
+
+    const std::filesystem::path relative(remote_path);
+    auto parent = root;
+    for (const auto& component : relative.parent_path()) {
+        parent /= component;
+        const auto status = std::filesystem::symlink_status(parent, error);
+        if (error) {
+            prepared.system_error = error.value();
+            return prepared;
+        }
+        if (std::filesystem::exists(status)) {
+            if (std::filesystem::is_symlink(status) ||
+                !std::filesystem::is_directory(status)) {
+                prepared.invalid_path = true;
+                return prepared;
+            }
+        } else if (!std::filesystem::create_directory(parent, error) && error) {
+            prepared.system_error = error.value();
+            return prepared;
+        }
+    }
+
+    const auto filename = relative.filename().string();
+    prepared.final_path = parent / filename;
+    prepared.part_path = parent /
+                         ("." + filename + "." + std::to_string(transfer_id) + ".part");
+    return prepared;
+}
+
 } // namespace
 
 FileTransferResult send_file(const int server_fd,
@@ -224,7 +286,7 @@ FileTransferResult send_file(const int server_fd,
     if (request_id == 0U) {
         return FileTransferResult{.status = FileTransferStatus::InvalidRequestId};
     }
-    if (!is_safe_remote_filename(remote_filename)) {
+    if (!is_safe_remote_path(remote_filename)) {
         return FileTransferResult{.status = FileTransferStatus::InvalidPath};
     }
     if (!valid_limits(limits)) {
@@ -400,19 +462,19 @@ FileTransferResult receive_file(const int client_fd,
         return reject_before_ready(FileTransferResult{.status = FileTransferStatus::FileTooLarge});
     }
 
-    std::error_code filesystem_error;
-    std::filesystem::create_directories(destination_root, filesystem_error);
-    if (filesystem_error) {
+    const auto transfer_id = request_id;
+    const auto prepared = prepare_destination(
+        destination_root, metadata.filename, transfer_id);
+    if (!prepared.ok()) {
         return reject_before_ready(FileTransferResult{
-            .status = FileTransferStatus::FileOpenError,
-            .system_error = filesystem_error.value(),
+            .status = prepared.invalid_path ? FileTransferStatus::InvalidPath
+                                            : FileTransferStatus::FileOpenError,
+            .system_error = prepared.system_error,
         });
     }
-
-    const auto transfer_id = request_id;
-    const auto final_path = destination_root / metadata.filename;
-    const auto part_path = destination_root /
-                           ("." + metadata.filename + "." + std::to_string(transfer_id) + ".part");
+    const auto& final_path = prepared.final_path;
+    const auto& part_path = prepared.part_path;
+    std::error_code filesystem_error;
     const int raw_fd = ::open(part_path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
     if (raw_fd < 0) {
         return reject_before_ready(FileTransferResult{
@@ -612,4 +674,3 @@ std::string_view file_transfer_status_message(const FileTransferStatus status) n
 }
 
 } // namespace syncwire::protocol
-

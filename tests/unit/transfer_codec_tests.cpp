@@ -66,6 +66,10 @@ void test_transfer_payloads_round_trip(TestRunner& runner) {
 }
 
 void test_invalid_transfer_payloads(TestRunner& runner) {
+    runner.expect(syncwire::protocol::is_safe_remote_path("nested/report.bin"),
+                  "normalized nested remote path is accepted");
+    runner.expect(!syncwire::protocol::is_safe_remote_filename("nested/report.bin"),
+                  "single-file CLI name still rejects directory components");
     auto unsafe_payload = syncwire::protocol::encode_upload_metadata(
         syncwire::protocol::UploadMetadata{.filename = "safe", .file_size = 1U});
     unsafe_payload[syncwire::protocol::kUploadMetadataPrefixSize] = std::byte{0x2E};
