@@ -30,4 +30,7 @@ private:
 
 void run_protocol_tests(TestRunner& runner);
 void run_frame_parser_tests(TestRunner& runner);
+void run_unique_fd_tests(TestRunner& runner);
+void run_socket_io_tests(TestRunner& runner);
+void run_ping_pong_tests(TestRunner& runner);
 
