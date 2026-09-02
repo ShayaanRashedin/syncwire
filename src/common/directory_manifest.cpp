@@ -61,6 +61,10 @@ DirectoryScanResult scan_directory(const std::filesystem::path& root,
                                    const DirectoryScanLimits limits) {
     std::error_code filesystem_error;
     const auto root_status = std::filesystem::symlink_status(root, filesystem_error);
+    if (filesystem_error ==
+        std::make_error_code(std::errc::no_such_file_or_directory)) {
+        return failure(DirectoryScanError::RootNotDirectory);
+    }
     if (filesystem_error) {
         return failure(DirectoryScanError::FileIoError, filesystem_error.value());
     }
@@ -159,3 +163,4 @@ std::string_view directory_scan_error_message(const DirectoryScanError error) no
 }
 
 } // namespace syncwire
+
