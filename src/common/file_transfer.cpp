@@ -233,11 +233,14 @@ prepare_destination(const std::filesystem::path& root,
     std::error_code error;
 
     const auto root_status = std::filesystem::symlink_status(root, error);
-    if (error) {
+    const bool root_missing =
+        error == std::make_error_code(std::errc::no_such_file_or_directory);
+    if (error && !root_missing) {
         prepared.system_error = error.value();
         return prepared;
     }
-    if (std::filesystem::exists(root_status)) {
+    error.clear();
+    if (!root_missing && std::filesystem::exists(root_status)) {
         if (std::filesystem::is_symlink(root_status) ||
             !std::filesystem::is_directory(root_status)) {
             prepared.invalid_path = true;
@@ -253,11 +256,14 @@ prepare_destination(const std::filesystem::path& root,
     for (const auto& component : relative.parent_path()) {
         parent /= component;
         const auto status = std::filesystem::symlink_status(parent, error);
-        if (error) {
+        const bool parent_missing =
+            error == std::make_error_code(std::errc::no_such_file_or_directory);
+        if (error && !parent_missing) {
             prepared.system_error = error.value();
             return prepared;
         }
-        if (std::filesystem::exists(status)) {
+        error.clear();
+        if (!parent_missing && std::filesystem::exists(status)) {
             if (std::filesystem::is_symlink(status) ||
                 !std::filesystem::is_directory(status)) {
                 prepared.invalid_path = true;
@@ -674,3 +680,4 @@ std::string_view file_transfer_status_message(const FileTransferStatus status) n
 }
 
 } // namespace syncwire::protocol
+
