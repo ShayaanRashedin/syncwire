@@ -25,8 +25,22 @@ backpressure, resumable transfers, and failure handling.
 - tests for ownership, early disconnects, invalid frames, wrong message types, and mismatched IDs;
 - GitHub Actions build and test automation on Ubuntu.
 
-The blocking implementation is intentionally small and temporary. The next vertical slice will
-introduce non-blocking sockets, level-triggered `epoll`, per-connection state, and output queues.
+### 3. Verified single-file upload
+
+- an explicit upload state machine built from six framed message types;
+- portable binary payload codecs for metadata, chunks, acknowledgments, and results;
+- bounded 64 KiB chunks and a configurable 1 GiB default file-size limit;
+- client-side CRC-32 preflight and server-side streaming integrity verification;
+- contiguous-offset enforcement with an acknowledgment after every chunk;
+- basename-only remote paths that reject absolute paths and traversal attempts;
+- exclusive `.part` files, `fsync()`, checksum verification, and atomic rename on success;
+- cleanup and structured rejection for malformed requests, bad offsets, size mismatches, and
+  checksum failures;
+- end-to-end socket tests for successful multi-chunk upload and failure cleanup.
+
+The implementation remains deliberately single-client and blocking. This makes the transfer
+state machine independently testable before it is moved behind non-blocking sockets, `epoll`,
+per-connection state, and output queues.
 
 ## Build on Ubuntu or Debian
 
@@ -39,22 +53,34 @@ cmake --build --preset debug
 ctest --preset debug
 ```
 
-## Run the PING/PONG slice
+## Run the blocking vertical slices
 
 Start the single-client server in one terminal:
 
 ```bash
-./build/debug/syncwire-server 4040
+./build/debug/syncwire-server 4040 received
 ```
 
 Run the client in a second terminal:
 
 ```bash
-./build/debug/syncwire-client 127.0.0.1 4040 42
+./build/debug/syncwire-client 127.0.0.1 4040 ping 42
 ```
 
 The client must report `PONG received for request 42`; the server exits after serving that one
 request. Port `0` may be passed to the server to let Linux choose an available port.
+
+To upload a file, restart the one-request server and run:
+
+```bash
+./build/debug/syncwire-server 4040 received
+./build/debug/syncwire-client 127.0.0.1 4040 upload ./example.bin stored.bin 43
+cmp ./example.bin ./received/stored.bin
+```
+
+The remote name is optional and defaults to the source basename. It must be a plain filename;
+directory components are intentionally rejected in this slice. A successful server commits the
+file only after its declared size and CRC-32 match.
 
 You can also build without presets:
 
@@ -69,9 +95,10 @@ ctest --test-dir build --output-on-failure
 - C++20 and POSIX APIs on Linux.
 - All multi-byte wire fields use network byte order.
 - Frame and buffer sizes are bounded before allocation or dispatch.
+- Upload filenames are basenames, file chunks are contiguous, and incomplete files are never
+  exposed at their final path.
 - The parser retains incomplete data across reads and may emit multiple frames per read.
 - A protocol parsing error is terminal for that parser/connection.
 - Advanced transfer features are added only after the previous vertical slice is tested.
 
-See [`docs/protocol.md`](docs/protocol.md) for the first wire-format specification.
-
+See [`docs/protocol.md`](docs/protocol.md) for the wire-format and transfer-state specification.

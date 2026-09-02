@@ -11,11 +11,14 @@ option(SYNCWIRE_BUILD_TESTS "Build SyncWire tests" ON)
 
 add_library(syncwire_common
     src/common/codec.cpp
+    src/common/crc32.cpp
+    src/common/file_transfer.cpp
     src/common/frame_io.cpp
     src/common/frame_parser.cpp
     src/common/ping_pong.cpp
     src/common/socket_io.cpp
     src/common/tcp_socket.cpp
+    src/common/transfer_codec.cpp
 )
 
 add_library(SyncWire::common ALIAS syncwire_common)
@@ -73,6 +76,8 @@ if(SYNCWIRE_BUILD_TESTS)
         tests/unit/unique_fd_tests.cpp
         tests/unit/socket_io_tests.cpp
         tests/unit/ping_pong_tests.cpp
+        tests/unit/transfer_codec_tests.cpp
+        tests/unit/file_transfer_tests.cpp
     )
     target_link_libraries(syncwire_unit_tests PRIVATE SyncWire::common Threads::Threads)
     target_compile_features(syncwire_unit_tests PRIVATE cxx_std_20)
