@@ -41,7 +41,10 @@ PingPongResult serve_ping_once(const int client_fd) {
         return frame_error(*error);
     }
 
-    const auto& ping = std::get<Frame>(received);
+    return serve_ping_frame(client_fd, std::get<Frame>(received));
+}
+
+PingPongResult serve_ping_frame(const int client_fd, const Frame& ping) {
     const auto validation = validate_common(ping, MessageType::Ping);
     if (!validation.ok()) {
         return validation;
@@ -121,4 +124,3 @@ std::string_view ping_pong_status_message(const PingPongStatus status) noexcept 
 }
 
 } // namespace syncwire::protocol
-

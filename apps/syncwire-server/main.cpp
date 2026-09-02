@@ -1,11 +1,16 @@
+#include "syncwire/common/file_transfer.hpp"
+#include "syncwire/common/frame_io.hpp"
+#include "syncwire/common/frame_parser.hpp"
 #include "syncwire/common/ping_pong.hpp"
+#include "syncwire/common/protocol.hpp"
 #include "syncwire/common/tcp_socket.hpp"
+#include "syncwire/common/transfer_codec.hpp"
 #include "syncwire/common/unique_fd.hpp"
 
 #include <charconv>
-#include <cerrno>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
 #include <string_view>
 #include <system_error>
@@ -32,14 +37,25 @@ void print_tcp_error(const syncwire::net::TcpError& error) {
     std::cerr << '\n';
 }
 
-void print_exchange_error(const syncwire::protocol::PingPongResult& result) {
-    std::cerr << syncwire::protocol::ping_pong_status_message(result.status);
-    if (result.status == syncwire::protocol::PingPongStatus::FrameIoError) {
+void print_frame_error(const syncwire::protocol::FrameIoResult& result) {
+    std::cerr << syncwire::protocol::frame_io_status_message(result.status);
+    if (result.system_error != 0) {
+        std::cerr << ": " << std::strerror(result.system_error);
+    }
+}
+
+void print_transfer_error(const syncwire::protocol::FileTransferResult& result) {
+    std::cerr << syncwire::protocol::file_transfer_status_message(result.status);
+    if (result.status == syncwire::protocol::FileTransferStatus::FrameIoError) {
+        std::cerr << ": ";
+        print_frame_error(result.frame_io);
+    }
+    if (result.codec_error.has_value()) {
         std::cerr << ": "
-                  << syncwire::protocol::frame_io_status_message(result.frame_io.status);
-        if (result.frame_io.system_error != 0) {
-            std::cerr << ": " << std::strerror(result.frame_io.system_error);
-        }
+                  << syncwire::protocol::transfer_codec_error_message(*result.codec_error);
+    }
+    if (result.system_error != 0) {
+        std::cerr << ": " << std::strerror(result.system_error);
     }
     std::cerr << '\n';
 }
@@ -48,15 +64,16 @@ void print_exchange_error(const syncwire::protocol::PingPongResult& result) {
 
 int main(int argc, char* argv[]) {
     std::uint16_t requested_port = 4040U;
-    if (argc > 2 || (argc == 2 && !parse_port(argv[1], requested_port))) {
-        std::cerr << "Usage: syncwire-server [port]\n";
+    if (argc > 3 || (argc >= 2 && !parse_port(argv[1], requested_port))) {
+        std::cerr << "Usage: syncwire-server [port] [destination-directory]\n";
         return 2;
     }
+    const std::filesystem::path destination_root = argc == 3 ? argv[2] : "received";
 
     auto listener_result = syncwire::net::listen_ipv4("127.0.0.1", requested_port);
-    const auto* listener_error = std::get_if<syncwire::net::TcpError>(&listener_result);
-    if (listener_error != nullptr) {
-        print_tcp_error(*listener_error);
+    if (const auto* error = std::get_if<syncwire::net::TcpError>(&listener_result);
+        error != nullptr) {
+        print_tcp_error(*error);
         return 1;
     }
     auto listener = std::get<syncwire::UniqueFd>(std::move(listener_result));
@@ -78,13 +95,36 @@ int main(int argc, char* argv[]) {
     }
     auto client = std::get<syncwire::UniqueFd>(std::move(client_result));
 
-    const auto exchange = syncwire::protocol::serve_ping_once(client.get());
-    if (!exchange.ok()) {
-        print_exchange_error(exchange);
+    const auto received = syncwire::protocol::receive_frame(client.get());
+    if (const auto* error = std::get_if<syncwire::protocol::FrameIoResult>(&received);
+        error != nullptr) {
+        print_frame_error(*error);
+        std::cerr << '\n';
         return 1;
     }
+    const auto& first_frame = std::get<syncwire::protocol::Frame>(received);
 
-    std::cout << "PING received; PONG sent\n";
-    return 0;
+    if (first_frame.header.message_type == syncwire::protocol::MessageType::Ping) {
+        const auto exchange = syncwire::protocol::serve_ping_frame(client.get(), first_frame);
+        if (!exchange.ok()) {
+            std::cerr << syncwire::protocol::ping_pong_status_message(exchange.status) << '\n';
+            return 1;
+        }
+        std::cout << "PING received; PONG sent\n";
+        return 0;
+    }
+    if (first_frame.header.message_type == syncwire::protocol::MessageType::UploadRequest) {
+        const auto transfer = syncwire::protocol::receive_file(
+            client.get(), first_frame, destination_root);
+        if (!transfer.ok()) {
+            print_transfer_error(transfer);
+            return 1;
+        }
+        std::cout << "Committed upload of " << transfer.transferred << " bytes to "
+                  << destination_root << '\n';
+        return 0;
+    }
+
+    std::cerr << "First frame must be PING or UPLOAD_REQUEST\n";
+    return 1;
 }
-

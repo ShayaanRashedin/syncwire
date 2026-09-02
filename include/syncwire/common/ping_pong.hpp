@@ -29,8 +29,8 @@ struct PingPongResult {
 };
 
 [[nodiscard]] PingPongResult serve_ping_once(int client_fd);
+[[nodiscard]] PingPongResult serve_ping_frame(int client_fd, const Frame& ping);
 [[nodiscard]] PingPongResult perform_ping(int server_fd, std::uint64_t request_id);
 [[nodiscard]] std::string_view ping_pong_status_message(PingPongStatus status) noexcept;
 
 } // namespace syncwire::protocol
-

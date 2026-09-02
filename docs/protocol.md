@@ -1,4 +1,4 @@
-# SyncWire Protocol v1 (foundation)
+# SyncWire Protocol v1
 
 ## Transport
 
@@ -43,7 +43,8 @@ format because it may contain padding and uses host byte order.
 | `0x26` | `TRANSFER_RESULT` | Receiver reports verification/commit status |
 | `0x7f` | `ERROR` | Reports a structured protocol/operation error |
 
-Payload schemas and message-order rules will be specified as their vertical slices are added.
+Authentication and download payloads remain reserved for later slices. The upload payloads and
+ordering rules are specified below.
 
 ## PING/PONG exchange
 
@@ -54,6 +55,85 @@ nonzero transfer ID, wrong message type, or mismatched response ID makes the exc
 The blocking reference implementation reads exactly one complete frame and serves one client.
 This deliberately isolates protocol correctness and partial-I/O behavior before non-blocking
 connection management is introduced.
+
+## Single-file upload exchange
+
+Every upload uses one nonzero client-selected `request_id`. The initial `UPLOAD_REQUEST` has a
+zero transfer ID. The server returns a nonzero transfer ID in `TRANSFER_READY`; all later frames
+must carry both matching IDs. In the blocking reference slice the server uses the request ID as
+the transfer ID. A later concurrent implementation may allocate transfer IDs independently.
+
+The valid message order is:
+
+1. Client sends one `UPLOAD_REQUEST`.
+2. Server sends `TRANSFER_READY`, or a rejecting `TRANSFER_RESULT` with transfer ID zero.
+3. Client sends one or more contiguous `FILE_CHUNK` frames. The server responds to each with an
+   `ACKNOWLEDGMENT` containing the next required offset.
+4. Client sends `TRANSFER_COMPLETE` after exactly the declared byte count.
+5. Server verifies the byte count and CRC-32, atomically commits the file, and sends
+   `TRANSFER_RESULT`.
+
+Zero-byte files skip step 3. Any malformed payload, mismatched ID, unexpected message, gap,
+overlap, excess byte, early completion, or integrity failure terminates the transfer.
+
+### `UPLOAD_REQUEST` payload
+
+| Offset | Size | Field | Rule |
+| ---: | ---: | --- | --- |
+| 0 | 2 | Filename length | `1..255`, big-endian |
+| 2 | 8 | File size | Big-endian; default maximum is 1 GiB |
+| 10 | 4 | CRC-32 | IEEE CRC-32 of the complete file, big-endian |
+| 14 | variable | Filename | Exactly `filename_length` bytes |
+
+The filename is interpreted as a single destination basename. Empty names, `.`, `..`, NUL,
+forward slash, and backslash are rejected. This slice cannot create remote subdirectories.
+
+### `TRANSFER_READY` payload
+
+The payload is empty. Its header supplies the assigned nonzero transfer ID.
+
+### `FILE_CHUNK` payload
+
+| Offset | Size | Field | Rule |
+| ---: | ---: | --- | --- |
+| 0 | 8 | Byte offset | Big-endian; must equal the next expected offset |
+| 8 | variable | File data | `1..65536` bytes by default |
+
+The entire frame remains below the general 1 MiB frame-payload limit.
+
+### `ACKNOWLEDGMENT` payload
+
+The payload is one 8-byte big-endian integer containing the next expected byte offset.
+
+### `TRANSFER_COMPLETE` payload
+
+The payload is empty. The receiver accepts it only after exactly the declared file size.
+
+### `TRANSFER_RESULT` payload
+
+The payload is a one-byte result code:
+
+| Value | Meaning |
+| ---: | --- |
+| `0` | Success |
+| `1` | Invalid request or payload |
+| `2` | Invalid destination filename |
+| `3` | File exceeds configured limit |
+| `4` | File I/O failure |
+| `5` | Unexpected frame or correlation ID |
+| `6` | Noncontiguous chunk offset |
+| `7` | Declared and received sizes differ |
+| `8` | CRC-32 mismatch |
+
+CRC-32 detects accidental transfer corruption; it is not an authentication mechanism. A later
+authenticated protocol must use a cryptographic message authentication code.
+
+### Atomic destination commit
+
+The server creates an exclusive hidden `.part` file inside the destination directory and writes
+only contiguous bytes to it. After `TRANSFER_COMPLETE`, it checks size and CRC-32, calls
+`fsync()`, closes the file, and renames it to the requested basename on the same filesystem.
+Failures remove the part file and leave the final destination untouched.
 
 ## Incremental parsing
 
@@ -68,4 +148,3 @@ For each connection, the receiver:
 
 This behavior is tested with every split point, byte-at-a-time input, multiple frames in one read,
 truncated frames, and malformed headers.
-
