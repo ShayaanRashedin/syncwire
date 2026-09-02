@@ -40,9 +40,9 @@ enum class FileTransferStatus {
 
 struct FileTransferResult {
     FileTransferStatus status{FileTransferStatus::Success};
-    FrameIoResult frame_io;
-    std::optional<TransferCodecError> codec_error;
-    std::optional<TransferResultCode> remote_code;
+    FrameIoResult frame_io{};
+    std::optional<TransferCodecError> codec_error{};
+    std::optional<TransferResultCode> remote_code{};
     std::uint64_t transferred{0U};
     std::uint32_t expected_checksum{0U};
     std::uint32_t actual_checksum{0U};
@@ -71,3 +71,4 @@ receive_file(int client_fd,
 [[nodiscard]] std::string_view file_transfer_status_message(FileTransferStatus status) noexcept;
 
 } // namespace syncwire::protocol
+

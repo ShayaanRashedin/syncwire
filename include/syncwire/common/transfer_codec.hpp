@@ -15,6 +15,7 @@ inline constexpr std::size_t kChunkOffsetSize = 8U;
 inline constexpr std::size_t kAcknowledgmentPayloadSize = 8U;
 inline constexpr std::size_t kTransferResultPayloadSize = 1U;
 inline constexpr std::size_t kMaxRemoteFilenameLength = 255U;
+inline constexpr std::size_t kMaxRemotePathLength = 1024U;
 inline constexpr std::size_t kDefaultChunkSize = 64U * 1024U;
 inline constexpr std::uint64_t kDefaultMaxFileSize = 1024ULL * 1024ULL * 1024ULL;
 
@@ -61,6 +62,7 @@ using OffsetResult = std::variant<std::uint64_t, TransferCodecError>;
 using TransferCodeResult = std::variant<TransferResultCode, TransferCodecError>;
 
 [[nodiscard]] bool is_safe_remote_filename(std::string_view filename) noexcept;
+[[nodiscard]] bool is_safe_remote_path(std::string_view path) noexcept;
 [[nodiscard]] std::vector<std::byte> encode_upload_metadata(const UploadMetadata& metadata);
 [[nodiscard]] UploadMetadataResult decode_upload_metadata(std::span<const std::byte> payload);
 [[nodiscard]] std::vector<std::byte>

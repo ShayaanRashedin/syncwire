@@ -1,8 +1,11 @@
+#include "syncwire/common/directory_manifest.hpp"
+#include "syncwire/common/directory_sync.hpp"
 #include "syncwire/common/file_transfer.hpp"
 #include "syncwire/common/frame_io.hpp"
 #include "syncwire/common/frame_parser.hpp"
 #include "syncwire/common/ping_pong.hpp"
 #include "syncwire/common/protocol.hpp"
+#include "syncwire/common/sync_codec.hpp"
 #include "syncwire/common/tcp_socket.hpp"
 #include "syncwire/common/transfer_codec.hpp"
 #include "syncwire/common/unique_fd.hpp"
@@ -53,6 +56,30 @@ void print_transfer_error(const syncwire::protocol::FileTransferResult& result) 
     if (result.codec_error.has_value()) {
         std::cerr << ": "
                   << syncwire::protocol::transfer_codec_error_message(*result.codec_error);
+    }
+    if (result.system_error != 0) {
+        std::cerr << ": " << std::strerror(result.system_error);
+    }
+    std::cerr << '\n';
+}
+
+void print_sync_error(const syncwire::protocol::DirectorySyncResult& result) {
+    std::cerr << syncwire::protocol::directory_sync_status_message(result.status);
+    if (result.status == syncwire::protocol::DirectorySyncStatus::FrameIoError) {
+        std::cerr << ": ";
+        print_frame_error(result.frame_io);
+    }
+    if (result.status == syncwire::protocol::DirectorySyncStatus::FileTransferError) {
+        std::cerr << ": ";
+        print_transfer_error(result.file_transfer);
+        return;
+    }
+    if (result.scan_error.has_value()) {
+        std::cerr << ": " << syncwire::directory_scan_error_message(*result.scan_error);
+    }
+    if (result.codec_error.has_value()) {
+        std::cerr << ": "
+                  << syncwire::protocol::sync_codec_error_message(*result.codec_error);
     }
     if (result.system_error != 0) {
         std::cerr << ": " << std::strerror(result.system_error);
@@ -124,7 +151,19 @@ int main(int argc, char* argv[]) {
                   << destination_root << '\n';
         return 0;
     }
+    if (first_frame.header.message_type == syncwire::protocol::MessageType::SyncManifest) {
+        const auto sync = syncwire::protocol::receive_directory_sync(
+            client.get(), first_frame, destination_root);
+        if (!sync.ok()) {
+            print_sync_error(sync);
+            return 1;
+        }
+        std::cout << "Directory synchronized: " << sync.completed_uploads << " uploaded, "
+                  << sync.unchanged_files << " unchanged, " << sync.server_only_files
+                  << " server-only files preserved\n";
+        return 0;
+    }
 
-    std::cerr << "First frame must be PING or UPLOAD_REQUEST\n";
+    std::cerr << "First frame must be PING, UPLOAD_REQUEST, or SYNC_MANIFEST\n";
     return 1;
 }

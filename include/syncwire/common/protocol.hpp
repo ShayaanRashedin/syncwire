@@ -26,6 +26,11 @@ enum class MessageType : std::uint8_t {
     TransferComplete = 0x25,
     TransferResult = 0x26,
 
+    SyncManifest = 0x30,
+    SyncPlan = 0x31,
+    SyncComplete = 0x32,
+    SyncResult = 0x33,
+
     Error = 0x7F,
 };
 
@@ -43,6 +48,10 @@ enum class MessageType : std::uint8_t {
     case MessageType::Acknowledgment:
     case MessageType::TransferComplete:
     case MessageType::TransferResult:
+    case MessageType::SyncManifest:
+    case MessageType::SyncPlan:
+    case MessageType::SyncComplete:
+    case MessageType::SyncResult:
     case MessageType::Error:
         return true;
     }
@@ -63,4 +72,3 @@ struct FrameHeader {
 };
 
 } // namespace syncwire::protocol
-
