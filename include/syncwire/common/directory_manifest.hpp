@@ -1,5 +1,6 @@
 #pragma once
 
+#include "syncwire/common/protocol.hpp"
 #include "syncwire/common/transfer_codec.hpp"
 
 #include <cstddef>
@@ -54,3 +55,4 @@ scan_directory(const std::filesystem::path& root, DirectoryScanLimits limits = {
 [[nodiscard]] std::string_view directory_scan_error_message(DirectoryScanError error) noexcept;
 
 } // namespace syncwire
+
