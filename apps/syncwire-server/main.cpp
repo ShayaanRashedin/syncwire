@@ -1,3 +1,4 @@
+#include "syncwire/common/authentication.hpp"
 #include "syncwire/common/directory_sync.hpp"
 #include "syncwire/common/file_transfer.hpp"
 #include "syncwire/common/ping_pong.hpp"
@@ -10,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <syncstream>
@@ -60,7 +62,14 @@ void log_session(const std::size_t worker_id,
     output << "[worker " << worker_id << "] request " << result.request_id << ' '
            << syncwire::server::session_operation_message(result.operation) << ": ";
     if (!result.ok()) {
-        output << syncwire::server::session_status_message(result.status) << '\n';
+        output << syncwire::server::session_status_message(result.status);
+        if (result.status ==
+            syncwire::server::SessionStatus::AuthenticationError) {
+            output << ": "
+                   << syncwire::protocol::authentication_status_message(
+                          result.authentication.status);
+        }
+        output << '\n';
         return;
     }
 
@@ -105,11 +114,19 @@ int main(int argc, char* argv[]) {
         return 2;
     }
 
+    const char* secret_value = std::getenv("SYNCWIRE_PSK");
+    if (secret_value == nullptr ||
+        !syncwire::protocol::is_valid_authentication_secret(secret_value)) {
+        std::cerr << "SYNCWIRE_PSK must contain 16-1024 bytes\n";
+        return 2;
+    }
+
     syncwire::server::ConcurrentServerConfig config{
         .bind_address = "127.0.0.1",
         .port = static_cast<std::uint16_t>(port_value),
         .destination_root = argc >= 3 ? std::filesystem::path(argv[2])
                                      : std::filesystem::path("received"),
+        .authentication_secret = secret_value,
         .worker_count = worker_count,
     };
     syncwire::server::ConcurrentServer server(config, log_session);
@@ -125,7 +142,7 @@ int main(int argc, char* argv[]) {
 
     std::cout << "SyncWire concurrent server listening on 127.0.0.1:"
               << server.port() << " with " << worker_count
-              << " workers (Ctrl+C to stop)\n";
+              << " workers and HMAC authentication (Ctrl+C to stop)\n";
 
     const auto run_result = server.run([] {
         return shutdown_requested != 0;

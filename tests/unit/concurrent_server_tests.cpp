@@ -1,5 +1,6 @@
 #include "test_harness.hpp"
 
+#include "syncwire/common/authentication.hpp"
 #include "syncwire/common/directory_sync.hpp"
 #include "syncwire/common/file_transfer.hpp"
 #include "syncwire/common/ping_pong.hpp"
@@ -17,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <system_error>
 #include <thread>
@@ -25,6 +27,9 @@
 #include <vector>
 
 namespace {
+
+inline constexpr std::string_view kServerTestSecret =
+    "syncwire-concurrent-test-secret";
 
 class TemporaryServerDirectory {
 public:
@@ -80,6 +85,18 @@ private:
     return syncwire::UniqueFd{};
 }
 
+[[nodiscard]] syncwire::UniqueFd
+connect_authenticated(const std::uint16_t port) {
+    auto socket = connect_to(port);
+    if (!socket.valid() ||
+        !syncwire::protocol::authenticate_client(
+             socket.get(), kServerTestSecret)
+             .ok()) {
+        return syncwire::UniqueFd{};
+    }
+    return socket;
+}
+
 void test_concurrent_ping_sessions(TestRunner& runner) {
     TemporaryServerDirectory temporary;
     runner.expect(temporary.valid(), "temporary concurrent server directory opens");
@@ -91,6 +108,7 @@ void test_concurrent_ping_sessions(TestRunner& runner) {
         syncwire::server::ConcurrentServerConfig{
             .port = 0U,
             .destination_root = temporary.path() / "received",
+            .authentication_secret = std::string(kServerTestSecret),
             .worker_count = 4U,
             .max_pending_connections = 16U,
         });
@@ -112,7 +130,7 @@ void test_concurrent_ping_sessions(TestRunner& runner) {
     clients.reserve(client_count);
     for (std::size_t index = 0U; index < client_count; ++index) {
         clients.emplace_back([&, index] {
-            auto client = connect_to(server.port());
+            auto client = connect_authenticated(server.port());
             if (!client.valid()) {
                 return;
             }
@@ -160,6 +178,7 @@ void test_mixed_concurrent_protocol_sessions(TestRunner& runner) {
         syncwire::server::ConcurrentServerConfig{
             .port = 0U,
             .destination_root = destination,
+            .authentication_secret = std::string(kServerTestSecret),
             .worker_count = 3U,
             .max_pending_connections = 8U,
         },
@@ -181,7 +200,7 @@ void test_mixed_concurrent_protocol_sessions(TestRunner& runner) {
     std::atomic_bool upload_ok{false};
     std::atomic_bool sync_ok{false};
     std::jthread ping_client([&] {
-        auto socket = connect_to(server.port());
+        auto socket = connect_authenticated(server.port());
         if (socket.valid()) {
             ping_ok.store(
                 syncwire::protocol::perform_ping(socket.get(), 100U).ok(),
@@ -189,7 +208,7 @@ void test_mixed_concurrent_protocol_sessions(TestRunner& runner) {
         }
     });
     std::jthread upload_client([&] {
-        auto socket = connect_to(server.port());
+        auto socket = connect_authenticated(server.port());
         if (socket.valid()) {
             upload_ok.store(
                 syncwire::protocol::send_file(
@@ -199,7 +218,7 @@ void test_mixed_concurrent_protocol_sessions(TestRunner& runner) {
         }
     });
     std::jthread sync_client([&] {
-        auto socket = connect_to(server.port());
+        auto socket = connect_authenticated(server.port());
         if (socket.valid()) {
             sync_ok.store(
                 syncwire::protocol::sync_directory(
@@ -247,6 +266,7 @@ void test_active_connection_shutdown(TestRunner& runner) {
         syncwire::server::ConcurrentServerConfig{
             .port = 0U,
             .destination_root = temporary.path() / "received",
+            .authentication_secret = std::string(kServerTestSecret),
             .worker_count = 1U,
             .max_pending_connections = 2U,
             .epoll_timeout_ms = 10,
@@ -285,6 +305,7 @@ void test_active_connection_shutdown(TestRunner& runner) {
 void test_invalid_server_lifecycle(TestRunner& runner) {
     syncwire::server::ConcurrentServer server(
         syncwire::server::ConcurrentServerConfig{
+            .authentication_secret = std::string(kServerTestSecret),
             .worker_count = 0U,
         });
     runner.expect(
@@ -297,6 +318,15 @@ void test_invalid_server_lifecycle(TestRunner& runner) {
     runner.expect(
         server.start().status == syncwire::server::ConcurrentServerStatus::AlreadyStarted,
         "server start is single-attempt");
+
+    syncwire::server::ConcurrentServer weak_secret_server(
+        syncwire::server::ConcurrentServerConfig{
+            .authentication_secret = "too-short",
+        });
+    runner.expect(
+        weak_secret_server.start().status ==
+            syncwire::server::ConcurrentServerStatus::InvalidConfiguration,
+        "concurrent server rejects a weak authentication secret");
 }
 
 } // namespace

@@ -2,6 +2,7 @@
 
 int main() {
     TestRunner runner;
+    run_authentication_tests(runner);
     run_protocol_tests(runner);
     run_frame_parser_tests(runner);
     run_unique_fd_tests(runner);

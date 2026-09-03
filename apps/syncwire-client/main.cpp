@@ -1,3 +1,4 @@
+#include "syncwire/common/authentication.hpp"
 #include "syncwire/common/directory_manifest.hpp"
 #include "syncwire/common/directory_sync.hpp"
 #include "syncwire/common/file_transfer.hpp"
@@ -10,6 +11,7 @@
 #include <charconv>
 #include <cstdint>
 #include <cstring>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -53,6 +55,18 @@ void print_frame_error(const syncwire::protocol::FrameIoResult& result) {
     if (result.system_error != 0) {
         std::cerr << ": " << std::strerror(result.system_error);
     }
+}
+
+void print_authentication_error(
+    const syncwire::protocol::AuthenticationResult& result) {
+    std::cerr
+        << syncwire::protocol::authentication_status_message(result.status);
+    if (result.status ==
+        syncwire::protocol::AuthenticationStatus::FrameIoError) {
+        std::cerr << ": ";
+        print_frame_error(result.frame_io);
+    }
+    std::cerr << '\n';
 }
 
 void print_exchange_error(const syncwire::protocol::PingPongResult& result) {
@@ -170,6 +184,14 @@ int main(int argc, char* argv[]) {
         return 2;
     }
 
+    const char* secret_value = std::getenv("SYNCWIRE_PSK");
+    if (secret_value == nullptr ||
+        !syncwire::protocol::is_valid_authentication_secret(secret_value)) {
+        std::cerr << "SYNCWIRE_PSK must contain 16-1024 bytes\n";
+        return 2;
+    }
+    const std::string_view authentication_secret(secret_value);
+
     auto socket_result = syncwire::net::connect_ipv4(
         argv[1], static_cast<std::uint16_t>(port_value));
     if (const auto* error = std::get_if<syncwire::net::TcpError>(&socket_result);
@@ -178,6 +200,12 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     auto socket = std::get<syncwire::UniqueFd>(std::move(socket_result));
+    const auto authentication = syncwire::protocol::authenticate_client(
+        socket.get(), authentication_secret);
+    if (!authentication.ok()) {
+        print_authentication_error(authentication);
+        return 1;
+    }
 
     if (command == "ping") {
         const auto exchange = syncwire::protocol::perform_ping(socket.get(), request_id);
@@ -211,3 +239,4 @@ int main(int argc, char* argv[]) {
               << " server-only files preserved\n";
     return 0;
 }
+

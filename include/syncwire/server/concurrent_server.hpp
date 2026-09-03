@@ -18,6 +18,7 @@ struct ConcurrentServerConfig {
     std::string bind_address{"127.0.0.1"};
     std::uint16_t port{4040U};
     std::filesystem::path destination_root{"received"};
+    std::string authentication_secret;
     std::size_t worker_count{4U};
     std::size_t max_pending_connections{64U};
     int backlog{128};
