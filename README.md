@@ -113,6 +113,8 @@ exposing this protocol to an untrusted network.
 - the CLI reports bytes reused and bytes sent in the successful upload attempt;
 - Debug/Release CI and ASan/UBSan unit tests exercise recovery and negative cases;
 - a real TCP demo tests mid-frame interruption, server restart, automatic reconnect, and sync.
+- queue-to-worker registration is synchronized with shutdown cancellation, with 128 repeated
+  silent-client shutdown cases in the concurrency suite.
 
 Both peers must be upgraded together: protocol v1 is rejected explicitly rather than interpreted
 as the new resume exchange. Rerunning the same upload or sync command also resumes saved state.

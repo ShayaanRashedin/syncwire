@@ -31,6 +31,10 @@ Resume tests add matching/empty/complete prefixes, a mid-header disconnect, corr
 source changes, oversized partials, state-byte/count budgets, symlink/hardlink rejection,
 reserved-namespace validation, and strict resume payload encoding.
 
+The concurrent suite repeats the silent-client shutdown case 128 times to exercise sockets moving
+from the pending queue into active workers. Registration and cancellation share the same mutex
+as the shutdown scan, so a late worker cannot start blocking I/O after shutdown missed its socket.
+
 CTest reports one executable; its verbose output reports the number of individual assertions.
 One passing CTest entry therefore does not mean there is only one test case.
 
