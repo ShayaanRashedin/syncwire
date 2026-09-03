@@ -334,7 +334,9 @@ void test_invalid_server_lifecycle(TestRunner& runner) {
 void run_concurrent_server_tests(TestRunner& runner) {
     test_concurrent_ping_sessions(runner);
     test_mixed_concurrent_protocol_sessions(runner);
-    test_active_connection_shutdown(runner);
+    // Exercise the queued -> active transition against immediate shutdown repeatedly.
+    for (unsigned iteration = 0U; iteration < 128U; ++iteration) {
+        test_active_connection_shutdown(runner);
+    }
     test_invalid_server_lifecycle(runner);
 }
-

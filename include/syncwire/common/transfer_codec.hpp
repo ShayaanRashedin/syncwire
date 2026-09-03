@@ -13,6 +13,8 @@ namespace syncwire::protocol {
 inline constexpr std::size_t kUploadMetadataPrefixSize = 14U;
 inline constexpr std::size_t kChunkOffsetSize = 8U;
 inline constexpr std::size_t kAcknowledgmentPayloadSize = 8U;
+inline constexpr std::size_t kTransferReadyPayloadSize = 12U;
+inline constexpr std::string_view kPartialDirectory = ".syncwire-partials";
 inline constexpr std::size_t kTransferResultPayloadSize = 1U;
 inline constexpr std::size_t kMaxRemoteFilenameLength = 255U;
 inline constexpr std::size_t kMaxRemotePathLength = 1024U;
@@ -56,10 +58,18 @@ struct FileChunk {
     [[nodiscard]] friend bool operator==(const FileChunk&, const FileChunk&) = default;
 };
 
+struct TransferReady {
+    std::uint64_t offset{0U};
+    std::uint32_t prefix_checksum{0U};
+
+    [[nodiscard]] friend bool operator==(const TransferReady&, const TransferReady&) = default;
+};
+
 using UploadMetadataResult = std::variant<UploadMetadata, TransferCodecError>;
 using FileChunkResult = std::variant<FileChunk, TransferCodecError>;
 using OffsetResult = std::variant<std::uint64_t, TransferCodecError>;
 using TransferCodeResult = std::variant<TransferResultCode, TransferCodecError>;
+using TransferReadyResult = std::variant<TransferReady, TransferCodecError>;
 
 [[nodiscard]] bool is_safe_remote_filename(std::string_view filename) noexcept;
 [[nodiscard]] bool is_safe_remote_path(std::string_view path) noexcept;
@@ -70,6 +80,8 @@ encode_file_chunk(std::uint64_t offset, std::span<const std::byte> data);
 [[nodiscard]] FileChunkResult decode_file_chunk(std::span<const std::byte> payload);
 [[nodiscard]] std::vector<std::byte> encode_offset(std::uint64_t offset);
 [[nodiscard]] OffsetResult decode_offset(std::span<const std::byte> payload);
+[[nodiscard]] std::vector<std::byte> encode_transfer_ready(const TransferReady& ready);
+[[nodiscard]] TransferReadyResult decode_transfer_ready(std::span<const std::byte> payload);
 [[nodiscard]] std::vector<std::byte> encode_transfer_result(TransferResultCode code);
 [[nodiscard]] TransferCodeResult decode_transfer_result(std::span<const std::byte> payload);
 [[nodiscard]] std::string_view transfer_codec_error_message(TransferCodecError error) noexcept;

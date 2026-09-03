@@ -1,8 +1,8 @@
-# SyncWire Protocol v1
+# SyncWire Protocol v2
 
 ## Transport
 
-SyncWire v1 runs over TCP. TCP is an ordered byte stream; it does not preserve message
+SyncWire v2 runs over TCP. TCP is an ordered byte stream; it does not preserve message
 boundaries. A receiver must therefore accumulate bytes until a complete fixed header and its
 declared payload are available.
 
@@ -11,14 +11,14 @@ declared payload are available.
 Every frame begins with a fixed 32-byte header. All multi-byte integers are unsigned and encoded
 in big-endian (network) byte order.
 
-| Offset | Size | Field | v1 rule |
+| Offset | Size | Field | v2 rule |
 | ---: | ---: | --- | --- |
 | 0 | 4 | Magic | `0x53574952` (`SWIR`) |
-| 4 | 1 | Version | `1` |
-| 5 | 1 | Message type | Must be a known v1 value |
+| 4 | 1 | Version | `2` |
+| 5 | 1 | Message type | Must be a known v2 value |
 | 6 | 2 | Header size | `32` |
 | 8 | 4 | Payload length | Must not exceed the configured limit |
-| 12 | 4 | Flags | Must be zero in v1 |
+| 12 | 4 | Flags | Must be zero in v2 |
 | 16 | 8 | Request ID | Correlates request and response |
 | 24 | 8 | Transfer ID | Zero when no transfer exists yet |
 
@@ -58,12 +58,12 @@ Authentication frames use `request_id = 0` and `transfer_id = 0`.
 1. Server generates 32 random bytes with OpenSSL `RAND_bytes()` and sends them as
    `AUTH_CHALLENGE`.
 2. Client generates its own 32-byte nonce and calculates HMAC-SHA256 over the ASCII domain
-   string `SyncWire-v1-client-proof`, the server nonce, and the client nonce. The configured
+   string `SyncWire-v2-client-proof`, the server nonce, and the client nonce. The configured
    `SYNCWIRE_PSK` bytes are the HMAC key.
 3. Client sends its 32-byte nonce followed by the 32-byte digest as `AUTH_PROOF`.
 4. Server independently calculates the client digest and compares it with `CRYPTO_memcmp()`.
 5. When accepted, the server calculates HMAC-SHA256 over
-   `SyncWire-v1-server-proof || server-nonce || client-nonce || client-proof`.
+   `SyncWire-v2-server-proof || server-nonce || client-nonce || client-proof`.
 6. Server sends `AUTH_RESULT`. Rejection is the one byte `1`; acceptance is the byte `0`
    followed by the 32-byte server proof.
 7. Client calculates and constant-time verifies the server proof before sending an operation.
@@ -117,13 +117,14 @@ The valid message order is:
 
 1. Client sends one `UPLOAD_REQUEST`.
 2. Server sends `TRANSFER_READY`, or a rejecting `TRANSFER_RESULT` with transfer ID zero.
-3. Client sends one or more contiguous `FILE_CHUNK` frames. The server responds to each with an
+3. Client verifies the offered prefix, then sends contiguous `FILE_CHUNK` frames starting at
+   that offset (or zero to restart a mismatched prefix). The server responds to each with an
    `ACKNOWLEDGMENT` containing the next required offset.
 4. Client sends `TRANSFER_COMPLETE` after exactly the declared byte count.
 5. Server verifies the byte count and CRC-32, atomically commits the file, and sends
    `TRANSFER_RESULT`.
 
-Zero-byte files skip step 3. Any malformed payload, mismatched ID, unexpected message, gap,
+Zero-byte files and fully recovered partials skip step 3. Any malformed payload, mismatched ID, unexpected message, gap,
 overlap, excess byte, early completion, or integrity failure terminates the transfer.
 
 ### `UPLOAD_REQUEST` payload
@@ -140,7 +141,21 @@ forward slash, and backslash are rejected. This slice cannot create remote subdi
 
 ### `TRANSFER_READY` payload
 
-The payload is empty. Its header supplies the assigned nonzero transfer ID.
+| Offset | Size | Field |
+| ---: | ---: | --- |
+| 0 | 8 | Stored prefix length, big-endian |
+| 8 | 4 | CRC-32 of those prefix bytes, big-endian |
+
+The payload is exactly 12 bytes. Its header supplies the assigned nonzero transfer ID.
+An offset greater than the declared file size is invalid. Offset zero must have CRC zero.
+The client calculates the CRC of its own prefix and skips those bytes only if it matches.
+Otherwise its first `FILE_CHUNK` uses offset zero, instructing the server to truncate the
+saved partial and reset its running checksum. Restart is allowed only on the first chunk.
+If the offered offset equals the whole file size and its prefix matches, the client sends
+`TRANSFER_COMPLETE` immediately; final verification and commit still run.
+
+This replaces v1's empty `TRANSFER_READY` payload. Both peers use header version 2 and v2 HMAC
+proof domains. A v1 peer is rejected before any operation; there is no silent downgrade.
 
 ### `FILE_CHUNK` payload
 
@@ -181,10 +196,35 @@ cryptographically protect every subsequent frame from an active network attacker
 
 ### Atomic destination commit
 
-The server creates an exclusive hidden `.part` file inside the destination directory and writes
-only contiguous bytes to it. After `TRANSFER_COMPLETE`, it checks size and CRC-32, calls
-`fsync()`, closes the file, and renames it to the requested basename on the same filesystem.
-Failures remove the part file and leave the final destination untouched.
+The server opens a private regular file under `<destination-root>/.syncwire-partials/`.
+Its basename is the hexadecimal SHA-256 digest of the encoded `UPLOAD_REQUEST` metadata,
+followed by `.part`. This binds path, size and whole-file CRC independently of request IDs.
+The hash provides bounded filenames, not cryptographic integrity for the file contents.
+
+An existing partial is opened without following symlinks, checked for single-link ownership,
+and exclusively advisory-locked. The server reconstructs its running CRC by reading it, then
+offers that size and CRC. Oversized partials restart at zero. No file contents are retained
+in memory across sessions; restart recovery works by reopening the stored file.
+
+Each accepted chunk is written and `fsync()`ed before its ACK; the internal directory is also
+synchronized. After `TRANSFER_COMPLETE`, the server checks full size and CRC-32 and atomically
+renames the partial to the final path, then synchronizes both affected directories. A transport
+EOF/system error retains complete bytes; malformed frames, bad offsets and integrity failures
+discard that identity. The previous final file is untouched until rename. If an error occurs
+after rename, a file can be committed even though success was not delivered to the client.
+
+All components named `.syncwire-partials` are reserved and forbidden in remote paths. Scanners
+exclude that namespace on both sides. Paths have a 1,024-byte total limit and 255-byte component
+limit. Default partial admission limits are 64 files and 4 GiB per destination root: existing
+other partials count their actual bytes, while the admitted transfer reserves its declared size.
+The dispatcher serializes destination writes during this check and transfer. Budgets do not
+expire stale identities automatically; operators may remove obsolete state with the server stopped.
+
+The client defaults to two transport retries with 100 ms, then 200 ms backoff; `--retries N`
+accepts 0 through 5. Every connection authenticates again and resends metadata. Sync retries
+rescan the source/destination, skip already committed files, and resume remaining partials.
+Authentication rejection, malformed input and semantic transfer failures are not retried.
+An ACK/result can be lost after work completed: this is safe retry, not exactly-once delivery.
 
 ## Directory synchronization exchange
 
@@ -227,13 +267,13 @@ files, and files found only on the server. Each upload path is encoded as a 2-by
 by its path bytes. The paths are strictly sorted and must all exist in the source manifest.
 
 A path is unchanged only when both its size and CRC-32 match. Missing paths and paths with either
-value changed are uploaded. Server-only paths are reported but never deleted in v1.
+value changed are uploaded. Server-only paths are reported but never deleted in v2.
 
 ### `SYNC_COMPLETE` and `SYNC_RESULT`
 
 `SYNC_COMPLETE` has no payload. `SYNC_RESULT` contains one byte: `0` for successful destination
 verification or `1` when a post-upload scan still differs from the source manifest. Server-only
-files do not cause verification failure.
+files do not cause verification failure. Internal partial state is excluded from both scans.
 
 ## Incremental parsing
 
@@ -248,4 +288,3 @@ For each connection, the receiver:
 
 This behavior is tested with every split point, byte-at-a-time input, multiple frames in one read,
 truncated frames, and malformed headers.
-

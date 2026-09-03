@@ -38,4 +38,4 @@ void run_file_transfer_tests(TestRunner& runner);
 void run_directory_sync_tests(TestRunner& runner);
 void run_concurrent_server_tests(TestRunner& runner);
 void run_authentication_tests(TestRunner& runner);
-
+void run_resume_tests(TestRunner& runner);

@@ -10,6 +10,17 @@ permissions:
 
 jobs:
   build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - preset: debug
+            sanitizers: "OFF"
+          - preset: release
+            sanitizers: "OFF"
+          - preset: debug
+            sanitizers: "ON"
+    name: ${{ matrix.preset }} (sanitizers=${{ matrix.sanitizers }})
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -20,11 +31,14 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build g++ libssl-dev
 
       - name: Configure
-        run: cmake --preset debug
+        run: cmake --preset ${{ matrix.preset }} -DSYNCWIRE_SANITIZERS=${{ matrix.sanitizers }} -DCMAKE_CXX_FLAGS=-Werror
 
       - name: Build
-        run: cmake --build --preset debug
+        run: cmake --build --preset ${{ matrix.preset }}
 
       - name: Test
-        run: ctest --preset debug
+        run: ctest --preset ${{ matrix.preset }} --verbose
 
+      - name: Real TCP restart, retry, and sync acceptance
+        if: matrix.sanitizers == 'OFF'
+        run: python3 scripts/verify_resume.py --build-dir build/${{ matrix.preset }}

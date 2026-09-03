@@ -6,7 +6,7 @@
 namespace syncwire::protocol {
 
 inline constexpr std::uint32_t kMagic = 0x53574952U; // ASCII: SWIR
-inline constexpr std::uint8_t kVersion = 1U;
+inline constexpr std::uint8_t kVersion = 2U;
 inline constexpr std::size_t kWireHeaderSize = 32U;
 inline constexpr std::uint32_t kDefaultMaxPayload = 1024U * 1024U;
 

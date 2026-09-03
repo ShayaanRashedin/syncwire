@@ -2,14 +2,18 @@ cmake_minimum_required(VERSION 3.20)
 
 project(
     SyncWire
-    VERSION 0.1.0
+    VERSION 0.2.0
     DESCRIPTION "Concurrent TCP file synchronization service"
     LANGUAGES CXX
 )
 
 option(SYNCWIRE_BUILD_TESTS "Build SyncWire tests" ON)
+option(SYNCWIRE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "SyncWire requires Linux (epoll and POSIX APIs). Use a Linux VM or WSL.")
+endif()
 find_package(Threads REQUIRED)
-find_package(OpenSSL REQUIRED)
+find_package(OpenSSL 3.0 REQUIRED)
 
 add_library(syncwire_common
     src/common/authentication.cpp
@@ -33,6 +37,10 @@ add_library(SyncWire::common ALIAS syncwire_common)
 
 target_compile_features(syncwire_common PUBLIC cxx_std_20)
 target_link_libraries(syncwire_common PUBLIC Threads::Threads OpenSSL::Crypto)
+if(SYNCWIRE_SANITIZERS)
+    target_compile_options(syncwire_common PUBLIC -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(syncwire_common PUBLIC -fsanitize=address,undefined)
+endif()
 target_include_directories(syncwire_common
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -87,6 +95,7 @@ if(SYNCWIRE_BUILD_TESTS)
         tests/unit/ping_pong_tests.cpp
         tests/unit/transfer_codec_tests.cpp
         tests/unit/file_transfer_tests.cpp
+        tests/unit/resume_tests.cpp
         tests/unit/directory_sync_tests.cpp
         tests/unit/concurrent_server_tests.cpp
     )
@@ -109,5 +118,8 @@ if(SYNCWIRE_BUILD_TESTS)
     endif()
 
     add_test(NAME syncwire_unit_tests COMMAND syncwire_unit_tests)
+    set_tests_properties(syncwire_unit_tests PROPERTIES TIMEOUT 60)
 endif()
 
+include(GNUInstallDirs)
+install(TARGETS syncwire-client syncwire-server RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

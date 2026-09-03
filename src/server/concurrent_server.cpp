@@ -67,6 +67,7 @@ struct ConcurrentServer::Impl {
     std::vector<std::jthread> workers;
 
     std::mutex active_mutex;
+    bool active_stopping{false}; // Guarded by active_mutex, including worker registration.
     std::unordered_set<int> active_connections;
     std::mutex destination_mutex;
 
@@ -87,6 +88,7 @@ struct ConcurrentServer::Impl {
 
     void shutdown_active_connections() noexcept {
         const std::scoped_lock lock(active_mutex);
+        active_stopping = true;
         for (const int fd : active_connections) {
             static_cast<void>(::shutdown(fd, SHUT_RDWR));
         }
@@ -109,6 +111,13 @@ struct ConcurrentServer::Impl {
 
             {
                 const std::scoped_lock lock(active_mutex);
+                // A socket can leave pending while shutdown is scanning active sockets.
+                // Register-or-cancel under the SAME mutex as the shutdown scan so that
+                // no worker can start blocking I/O after its socket was missed by shutdown.
+                if (active_stopping) {
+                    cancelled.fetch_add(1U, std::memory_order_relaxed);
+                    continue;
+                }
                 active_connections.insert(client.get());
             }
             auto result =
@@ -399,4 +408,3 @@ concurrent_server_status_message(const ConcurrentServerStatus status) noexcept {
 }
 
 } // namespace syncwire::server
-

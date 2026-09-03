@@ -78,7 +78,8 @@ void log_session(const std::size_t worker_id,
         output << "PONG sent\n";
         return;
     case syncwire::server::SessionOperation::Upload:
-        output << result.transfer.transferred << " bytes committed\n";
+        output << result.transfer.transferred << " bytes committed, "
+               << result.transfer.resumed_from << " bytes reused\n";
         return;
     case syncwire::server::SessionOperation::DirectorySync:
         output << result.sync.completed_uploads << " uploaded, "
@@ -142,7 +143,7 @@ int main(int argc, char* argv[]) {
 
     std::cout << "SyncWire concurrent server listening on 127.0.0.1:"
               << server.port() << " with " << worker_count
-              << " workers and HMAC authentication (Ctrl+C to stop)\n";
+              << " workers and HMAC authentication (Ctrl+C to stop)\n" << std::flush;
 
     const auto run_result = server.run([] {
         return shutdown_requested != 0;
@@ -159,4 +160,3 @@ int main(int argc, char* argv[]) {
     }
     return 0;
 }
-

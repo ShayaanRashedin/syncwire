@@ -27,9 +27,9 @@ using Nonce = std::array<std::byte, kAuthenticationNonceSize>;
 using Proof = std::array<std::byte, kAuthenticationProofSize>;
 
 inline constexpr std::string_view kClientProofDomain =
-    "SyncWire-v1-client-proof";
+    "SyncWire-v2-client-proof";
 inline constexpr std::string_view kServerProofDomain =
-    "SyncWire-v1-server-proof";
+    "SyncWire-v2-server-proof";
 inline constexpr std::byte kAuthenticationAccepted{0x00};
 inline constexpr std::byte kAuthenticationRejected{0x01};
 
@@ -392,4 +392,3 @@ authentication_status_message(const AuthenticationStatus status) noexcept {
 }
 
 } // namespace syncwire::protocol
-
