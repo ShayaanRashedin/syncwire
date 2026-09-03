@@ -65,10 +65,10 @@ void test_header_validation(TestRunner& runner) {
                   "invalid magic is rejected");
 
     encoded = syncwire::protocol::encode_header(valid);
-    encoded[4U] = std::byte{0x02};
+    encoded[4U] = std::byte{0x01};
     runner.expect(has_error(syncwire::protocol::decode_header(encoded),
                             CodecError::UnsupportedVersion),
-                  "unsupported version is rejected");
+                  "legacy v1 is rejected instead of misreading resume metadata");
 
     encoded = syncwire::protocol::encode_header(valid);
     encoded[5U] = std::byte{0x55};

@@ -114,7 +114,7 @@ private:
 }
 
 [[nodiscard]] bool no_part_files(const std::filesystem::path& directory) {
-    for (const auto& entry : std::filesystem::directory_iterator(directory)) {
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(directory)) {
         if (entry.path().extension() == ".part") {
             return false;
         }

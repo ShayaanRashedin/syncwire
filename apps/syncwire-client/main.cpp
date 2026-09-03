@@ -9,6 +9,7 @@
 #include "syncwire/common/unique_fd.hpp"
 
 #include <charconv>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <cstdlib>
@@ -17,6 +18,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <variant>
 
@@ -39,7 +41,8 @@ void print_usage() {
               << "  syncwire-client <IPv4 address> <port> upload <source-path> "
                  "[remote-name] [request-id]\n"
               << "  syncwire-client <IPv4 address> <port> sync <source-directory> "
-                 "[request-id]\n";
+                 "[request-id]\n"
+              << "Append --retries <0-5> to retry transport failures (default: 2).\n";
 }
 
 void print_tcp_error(const syncwire::net::TcpError& error) {
@@ -128,6 +131,14 @@ void print_sync_error(const syncwire::protocol::DirectorySyncResult& result) {
 } // namespace
 
 int main(int argc, char* argv[]) {
+    unsigned retries = 2U;
+    if (argc >= 3 && std::string_view(argv[argc - 2]) == "--retries") {
+        if (!parse_unsigned(std::string_view(argv[argc - 1]), retries) || retries > 5U) {
+            std::cerr << "Retries must be in the range 0-5\n";
+            return 2;
+        }
+        argc -= 2;
+    }
     if (argc < 4) {
         print_usage();
         return 2;
@@ -192,11 +203,19 @@ int main(int argc, char* argv[]) {
     }
     const std::string_view authentication_secret(secret_value);
 
+    auto transport_failure = [](const syncwire::protocol::FrameIoResult& io) {
+        return io.status == syncwire::protocol::FrameIoStatus::PeerClosed ||
+               io.status == syncwire::protocol::FrameIoStatus::SystemError;
+    };
+    for (unsigned attempt = 0U; attempt <= retries; ++attempt) {
+    bool retryable = false;
+    const auto run_once = [&]() -> int {
     auto socket_result = syncwire::net::connect_ipv4(
         argv[1], static_cast<std::uint16_t>(port_value));
     if (const auto* error = std::get_if<syncwire::net::TcpError>(&socket_result);
         error != nullptr) {
         print_tcp_error(*error);
+        retryable = true;
         return 1;
     }
     auto socket = std::get<syncwire::UniqueFd>(std::move(socket_result));
@@ -204,6 +223,8 @@ int main(int argc, char* argv[]) {
         socket.get(), authentication_secret);
     if (!authentication.ok()) {
         print_authentication_error(authentication);
+        retryable = authentication.status == syncwire::protocol::AuthenticationStatus::FrameIoError &&
+                    transport_failure(authentication.frame_io);
         return 1;
     }
 
@@ -211,6 +232,8 @@ int main(int argc, char* argv[]) {
         const auto exchange = syncwire::protocol::perform_ping(socket.get(), request_id);
         if (!exchange.ok()) {
             print_exchange_error(exchange);
+            retryable = exchange.status == syncwire::protocol::PingPongStatus::FrameIoError &&
+                        transport_failure(exchange.frame_io);
             return 1;
         }
         std::cout << "PONG received for request " << request_id << '\n';
@@ -222,9 +245,13 @@ int main(int argc, char* argv[]) {
             socket.get(), source_path, remote_name, request_id);
         if (!transfer.ok()) {
             print_transfer_error(transfer);
+            retryable = transfer.status == syncwire::protocol::FileTransferStatus::FrameIoError &&
+                        transport_failure(transfer.frame_io);
             return 1;
         }
-        std::cout << "Uploaded " << transfer.transferred << " bytes as " << remote_name << '\n';
+        std::cout << "Uploaded " << transfer.transferred << " bytes as " << remote_name
+                  << " (resumed " << transfer.resumed_from << " bytes, sent "
+                  << transfer.transferred - transfer.resumed_from << " bytes)\n";
         return 0;
     }
 
@@ -232,11 +259,25 @@ int main(int argc, char* argv[]) {
         socket.get(), source_directory, request_id);
     if (!sync.ok()) {
         print_sync_error(sync);
+        retryable = (sync.status == syncwire::protocol::DirectorySyncStatus::FrameIoError &&
+                     transport_failure(sync.frame_io)) ||
+                    (sync.status == syncwire::protocol::DirectorySyncStatus::FileTransferError &&
+                     sync.file_transfer.status == syncwire::protocol::FileTransferStatus::FrameIoError &&
+                     transport_failure(sync.file_transfer.frame_io));
         return 1;
     }
     std::cout << "Directory synchronized: " << sync.completed_uploads << " uploaded, "
               << sync.unchanged_files << " unchanged, " << sync.server_only_files
               << " server-only files preserved\n";
     return 0;
+    };
+    const int result = run_once();
+    if (result == 0 || !retryable || attempt == retries) {
+        return result;
+    }
+    std::cerr << "Transport interrupted; reconnecting (retry " << attempt + 1U << '/' << retries
+              << ")\n";
+    std::this_thread::sleep_for(std::chrono::milliseconds(100U << attempt));
+    }
+    return 1;
 }
-

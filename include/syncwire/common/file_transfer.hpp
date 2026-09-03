@@ -14,6 +14,8 @@ namespace syncwire::protocol {
 struct TransferLimits {
     std::uint64_t max_file_size{kDefaultMaxFileSize};
     std::size_t chunk_size{kDefaultChunkSize};
+    std::size_t max_partial_files{64U};
+    std::uint64_t max_partial_bytes{4ULL * kDefaultMaxFileSize};
 };
 
 enum class FileTransferStatus {
@@ -49,6 +51,8 @@ struct FileTransferResult {
     std::uint64_t expected_id{0U};
     std::uint64_t actual_id{0U};
     int system_error{0};
+    // Bytes reused from a previous connection (transferred is the final file size).
+    std::uint64_t resumed_from{0U};
 
     [[nodiscard]] bool ok() const noexcept {
         return status == FileTransferStatus::Success;
@@ -71,4 +75,3 @@ receive_file(int client_fd,
 [[nodiscard]] std::string_view file_transfer_status_message(FileTransferStatus status) noexcept;
 
 } // namespace syncwire::protocol
-

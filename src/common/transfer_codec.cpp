@@ -107,7 +107,8 @@ bool is_safe_remote_path(const std::string_view path) noexcept {
                                 ? path.size() - start
                                 : separator - start;
         const auto component = path.substr(start, length);
-        if (component.empty() || component == "." || component == "..") {
+        if (component.empty() || component == "." || component == ".." ||
+            component == kPartialDirectory || component.size() > kMaxRemoteFilenameLength) {
             return false;
         }
         if (separator == std::string_view::npos) {
@@ -201,6 +202,19 @@ OffsetResult decode_offset(const std::span<const std::byte> payload) {
         return TransferCodecError::PayloadSizeMismatch;
     }
     return get_u64(payload, 0U);
+}
+
+std::vector<std::byte> encode_transfer_ready(const TransferReady& ready) {
+    auto payload = encode_offset(ready.offset);
+    append_u32(payload, ready.prefix_checksum);
+    return payload;
+}
+
+TransferReadyResult decode_transfer_ready(const std::span<const std::byte> payload) {
+    if (payload.size() != kTransferReadyPayloadSize) {
+        return TransferCodecError::PayloadSizeMismatch;
+    }
+    return TransferReady{.offset = get_u64(payload, 0U), .prefix_checksum = get_u32(payload, 8U)};
 }
 
 std::vector<std::byte> encode_transfer_result(const TransferResultCode code) {

@@ -82,6 +82,11 @@ DirectoryScanResult scan_directory(const std::filesystem::path& root,
             return failure(DirectoryScanError::FileIoError, filesystem_error.value());
         }
 
+        if (iterator->path().filename() == protocol::kPartialDirectory) {
+            iterator.disable_recursion_pending();
+            iterator.increment(filesystem_error);
+            continue;
+        }
         const auto status = iterator->symlink_status(filesystem_error);
         if (filesystem_error) {
             return failure(DirectoryScanError::FileIoError, filesystem_error.value());
@@ -163,4 +168,3 @@ std::string_view directory_scan_error_message(const DirectoryScanError error) no
 }
 
 } // namespace syncwire
-
