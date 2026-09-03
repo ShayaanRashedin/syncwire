@@ -10,5 +10,7 @@ int main() {
     run_transfer_codec_tests(runner);
     run_file_transfer_tests(runner);
     run_directory_sync_tests(runner);
+    run_concurrent_server_tests(runner);
     return runner.finish();
 }
+

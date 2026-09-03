@@ -50,9 +50,23 @@ backpressure, resumable transfers, and failure handling.
 - symlinks are skipped rather than followed during recursive scans;
 - end-to-end tests for recursive upload, zero-work repeat sync, and symlink containment.
 
-The implementation remains deliberately single-client and blocking. This makes synchronization
-decisions independently testable before the session is moved behind non-blocking sockets,
-`epoll`, per-connection state, and output queues.
+### 5. Bounded concurrent server runtime
+
+- a non-blocking listening socket registered with Linux `epoll`;
+- a bounded connection queue instead of unbounded thread creation;
+- a configurable `std::jthread` worker pool that serves complete protocol sessions;
+- one reusable dispatcher for PING, upload, and directory-sync sessions;
+- parallel read-only PING sessions with serialized destination mutations for filesystem safety;
+- coordinated shutdown that stops accepting, closes queued sockets, and interrupts active sockets;
+- atomic accepted/completed/failed/rejected/cancelled counters and peak-queue telemetry;
+- synchronized per-session logging that remains readable across worker threads;
+- integration tests with simultaneous clients, mixed protocol operations, and a silent client
+  during shutdown.
+
+The server now uses a hybrid reactor/worker design: `epoll` handles readiness at the accept
+boundary, while a bounded pool runs the already-verified blocking session state machines. A
+future slice can move individual session reads and output queues into the reactor without
+changing the wire protocol.
 
 ## Build on Ubuntu or Debian
 
@@ -65,12 +79,12 @@ cmake --build --preset debug
 ctest --preset debug
 ```
 
-## Run the blocking vertical slices
+## Run the concurrent server
 
-Start the single-client server in one terminal:
+Start the server in one terminal. The optional final argument selects the worker count:
 
 ```bash
-./build/debug/syncwire-server 4040 received
+./build/debug/syncwire-server 4040 received 4
 ```
 
 Run the client in a second terminal:
@@ -79,13 +93,13 @@ Run the client in a second terminal:
 ./build/debug/syncwire-client 127.0.0.1 4040 ping 42
 ```
 
-The client must report `PONG received for request 42`; the server exits after serving that one
-request. Port `0` may be passed to the server to let Linux choose an available port.
+The client must report `PONG received for request 42`. The server stays available for more
+clients until `Ctrl+C`; shutdown prints aggregate session and queue statistics. Port `0` may
+be passed to let Linux choose an available port.
 
-To upload a file, restart the one-request server and run:
+To upload a file while the same server is running:
 
 ```bash
-./build/debug/syncwire-server 4040 received
 ./build/debug/syncwire-client 127.0.0.1 4040 upload ./example.bin stored.bin 43
 cmp ./example.bin ./received/stored.bin
 ```
@@ -94,20 +108,19 @@ The remote name is optional and defaults to the source basename. It must be a pl
 directory components are intentionally rejected in this slice. A successful server commits the
 file only after its declared size and CRC-32 match.
 
-To synchronize a directory tree, prepare a source and restart the server:
+To synchronize a directory tree against that server:
 
 ```bash
 mkdir -p /tmp/syncwire-source/nested
 printf 'alpha\n' > /tmp/syncwire-source/a.txt
 printf 'beta\n' > /tmp/syncwire-source/nested/b.txt
 
-./build/debug/syncwire-server 4040 received
 ./build/debug/syncwire-client 127.0.0.1 4040 sync /tmp/syncwire-source 100
 ```
 
-Run the server and client again with a new request ID. Unchanged source files should be reported
-without being uploaded. Files that exist only on the server are counted and preserved; deletion
-semantics require an explicit future opt-in and are not part of this slice.
+Run the client again with a new request ID. Unchanged source files should be reported without
+being uploaded. Files that exist only on the server are counted and preserved; deletion semantics
+require an explicit future opt-in and are not part of this slice.
 
 You can also build without presets:
 
@@ -125,8 +138,12 @@ ctest --test-dir build --output-on-failure
 - Upload filenames are basenames, file chunks are contiguous, and incomplete files are never
   exposed at their final path.
 - Directory synchronization never follows symlinks and never deletes server-only files.
+- The accept queue and worker count are bounded; overload closes excess sessions instead of
+  consuming memory without limit.
+- Destination-changing sessions are serialized until path-level locking is introduced.
 - The parser retains incomplete data across reads and may emit multiple frames per read.
 - A protocol parsing error is terminal for that parser/connection.
 - Advanced transfer features are added only after the previous vertical slice is tested.
 
 See [`docs/protocol.md`](docs/protocol.md) for the wire-format and transfer-state specification.
+

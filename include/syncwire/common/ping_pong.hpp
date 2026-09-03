@@ -19,7 +19,7 @@ enum class PingPongStatus {
 
 struct PingPongResult {
     PingPongStatus status{PingPongStatus::Success};
-    FrameIoResult frame_io;
+    FrameIoResult frame_io{};
     std::uint64_t expected_request_id{0U};
     std::uint64_t actual_request_id{0U};
 
@@ -34,3 +34,4 @@ struct PingPongResult {
 [[nodiscard]] std::string_view ping_pong_status_message(PingPongStatus status) noexcept;
 
 } // namespace syncwire::protocol
+

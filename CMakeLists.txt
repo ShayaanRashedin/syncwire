@@ -8,6 +8,7 @@ project(
 )
 
 option(SYNCWIRE_BUILD_TESTS "Build SyncWire tests" ON)
+find_package(Threads REQUIRED)
 
 add_library(syncwire_common
     src/common/codec.cpp
@@ -22,11 +23,14 @@ add_library(syncwire_common
     src/common/tcp_socket.cpp
     src/common/sync_codec.cpp
     src/common/transfer_codec.cpp
+    src/server/client_session.cpp
+    src/server/concurrent_server.cpp
 )
 
 add_library(SyncWire::common ALIAS syncwire_common)
 
 target_compile_features(syncwire_common PUBLIC cxx_std_20)
+target_link_libraries(syncwire_common PUBLIC Threads::Threads)
 target_include_directories(syncwire_common
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -70,7 +74,6 @@ endif()
 if(SYNCWIRE_BUILD_TESTS)
     include(CTest)
     enable_testing()
-    find_package(Threads REQUIRED)
 
     add_executable(syncwire_unit_tests
         tests/unit/test_main.cpp
@@ -82,6 +85,7 @@ if(SYNCWIRE_BUILD_TESTS)
         tests/unit/transfer_codec_tests.cpp
         tests/unit/file_transfer_tests.cpp
         tests/unit/directory_sync_tests.cpp
+        tests/unit/concurrent_server_tests.cpp
     )
     target_link_libraries(syncwire_unit_tests PRIVATE SyncWire::common Threads::Threads)
     target_compile_features(syncwire_unit_tests PRIVATE cxx_std_20)
@@ -103,3 +107,4 @@ if(SYNCWIRE_BUILD_TESTS)
 
     add_test(NAME syncwire_unit_tests COMMAND syncwire_unit_tests)
 endif()
+
