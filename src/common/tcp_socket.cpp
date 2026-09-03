@@ -11,8 +11,10 @@
 namespace syncwire::net {
 
 TcpSocketResult listen_ipv4(const std::string_view address, const std::uint16_t port,
-                            const int backlog) {
-    UniqueFd listener(::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0));
+                            const int backlog, const bool nonblocking) {
+    const int socket_flags =
+        SOCK_STREAM | SOCK_CLOEXEC | (nonblocking ? SOCK_NONBLOCK : 0);
+    UniqueFd listener(::socket(AF_INET, socket_flags, 0));
     if (!listener.valid()) {
         return TcpError{.operation = TcpOperation::CreateSocket, .system_error = errno};
     }

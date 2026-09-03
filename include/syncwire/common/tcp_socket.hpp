@@ -28,7 +28,10 @@ using TcpSocketResult = std::variant<UniqueFd, TcpError>;
 using TcpPortResult = std::variant<std::uint16_t, TcpError>;
 
 [[nodiscard]] TcpSocketResult
-listen_ipv4(std::string_view address, std::uint16_t port, int backlog = 16);
+listen_ipv4(std::string_view address,
+            std::uint16_t port,
+            int backlog = 16,
+            bool nonblocking = false);
 
 [[nodiscard]] TcpSocketResult connect_ipv4(std::string_view address, std::uint16_t port);
 [[nodiscard]] TcpSocketResult accept_one(int listener_fd) noexcept;

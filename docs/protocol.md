@@ -56,16 +56,34 @@ ordering rules are specified below.
 `request_id`; the server returns the same value in its `PONG`. A zero request ID, nonempty payload,
 nonzero transfer ID, wrong message type, or mismatched response ID makes the exchange invalid.
 
-The blocking reference implementation reads exactly one complete frame and serves one client.
-This deliberately isolates protocol correctness and partial-I/O behavior before non-blocking
-connection management is introduced.
+Each accepted TCP connection carries one complete PING, upload, or directory-sync session. The
+server may serve many independent connections concurrently.
+
+## Concurrent server runtime
+
+The listening socket is non-blocking and registered with Linux `epoll`. Readiness causes the
+acceptor to drain all currently available connections into a bounded in-memory queue. A fixed,
+configurable worker pool removes connections from that queue and executes one complete protocol
+session per connection.
+
+The queue and worker count are bounded. When the queue is full, a newly accepted connection is
+closed and counted as rejected rather than allocating an unbounded thread or buffer. PING
+sessions may execute in parallel. Upload and directory-sync sessions share a destination lock so
+manifest decisions, temporary-file creation, and atomic commits cannot race within one server
+process. This is deliberately conservative; path-level locking can increase write concurrency
+later without changing the protocol.
+
+On shutdown, the acceptor stops admitting clients, closes queued connections, calls `shutdown()`
+on active sockets to interrupt blocking I/O, and joins every worker. Accepted, completed, failed,
+rejected, cancelled, and peak-queue counters are reported by the command-line server.
 
 ## Single-file upload exchange
 
 Every upload uses one nonzero client-selected `request_id`. The initial `UPLOAD_REQUEST` has a
 zero transfer ID. The server returns a nonzero transfer ID in `TRANSFER_READY`; all later frames
-must carry both matching IDs. In the blocking reference slice the server uses the request ID as
-the transfer ID. A later concurrent implementation may allocate transfer IDs independently.
+must carry both matching IDs. The server currently uses the request ID as the transfer ID.
+Identifiers are scoped to one TCP connection, so concurrent clients may safely choose the same
+request ID.
 
 The valid message order is:
 
@@ -201,3 +219,4 @@ For each connection, the receiver:
 
 This behavior is tested with every split point, byte-at-a-time input, multiple frames in one read,
 truncated frames, and malformed headers.
+
