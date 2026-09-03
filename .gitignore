@@ -7,3 +7,6 @@
 *.part
 /received/
 *.swp
+__pycache__/
+*.pyc
+.syncwire-partials/

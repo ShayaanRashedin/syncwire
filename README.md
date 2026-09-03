@@ -1,8 +1,21 @@
 # SyncWire
 
+[![CI](https://github.com/ShayaanRashedin/syncwire/actions/workflows/ci.yml/badge.svg)](https://github.com/ShayaanRashedin/syncwire/actions/workflows/ci.yml)
+
 SyncWire is a Linux client-server application for reliable file transfer over TCP. The project
 is intentionally focused on protocol design, message framing, partial I/O, concurrency,
 backpressure, resumable transfers, and failure handling.
+
+## Portfolio MVP scope
+
+SyncWire uploads files and incrementally pushes directory trees to a Linux server. Interrupted
+uploads resume across authenticated connections and server restarts. It is a systems-programming
+portfolio project, not a production replacement for rsync or a secure Internet file service.
+
+Start with the [architecture and tradeoffs](docs/architecture.md), the
+[wire protocol](docs/protocol.md), or the [repeatable acceptance demo](docs/validation.md).
+The server is loopback-only: the HMAC handshake authenticates peers but does **not** encrypt or
+cryptographically protect subsequent file data. Use an encrypted tunnel on any untrusted link.
 
 ## Implemented milestones
 
@@ -33,7 +46,7 @@ backpressure, resumable transfers, and failure handling.
 - client-side CRC-32 preflight and server-side streaming integrity verification;
 - contiguous-offset enforcement with an acknowledgment after every chunk;
 - basename-only remote paths that reject absolute paths and traversal attempts;
-- exclusive `.part` files, `fsync()`, checksum verification, and atomic rename on success;
+- private `.part` files, `fsync()`, checksum verification, and atomic rename on success;
 - cleanup and structured rejection for malformed requests, bad offsets, size mismatches, and
   checksum failures;
 - end-to-end socket tests for successful multi-chunk upload and failure cleanup.
@@ -63,7 +76,7 @@ backpressure, resumable transfers, and failure handling.
 - integration tests with simultaneous clients, mixed protocol operations, and a silent client
   during shutdown.
 
-The server now uses a hybrid reactor/worker design: `epoll` handles readiness at the accept
+The server uses a hybrid reactor/worker design: `epoll` handles readiness at the accept
 boundary, while a bounded pool runs the already-verified blocking session state machines. A
 future slice can move individual session reads and output queues into the reactor without
 changing the wire protocol.
@@ -84,6 +97,27 @@ changing the wire protocol.
 Mutual authentication proves that both peers possess the same secret. It does not encrypt
 filenames or file contents. The current CLI binds the server to loopback; TLS is required before
 exposing this protocol to an untrusted network.
+
+### 7. Resumable uploads and recovery
+
+- protocol v2 offers a stored offset and prefix CRC-32 before sending file chunks;
+- the client verifies its source prefix and reuses only matching data;
+- mismatched/corrupted prefixes restart from zero; final size and CRC still gate atomic commit;
+- stable SHA-256 storage keys bind remote path, source size, and whole-file CRC, not request IDs;
+- interrupted transfers retain complete bytes under the reserved `.syncwire-partials` directory;
+- each chunk is synchronized before acknowledgment; saved state survives server process restarts;
+- malformed frames and transfer validation failures discard that transfer's partial;
+- internal storage refuses symlinks and multiply linked files, and locks active partial files;
+- partial state is bounded to 64 files and 4 GiB per destination root by default;
+- upload and sync automatically retry transport failures twice with bounded exponential backoff;
+- the CLI reports bytes reused and bytes sent in the successful upload attempt;
+- Debug/Release CI and ASan/UBSan unit tests exercise recovery and negative cases;
+- a real TCP demo tests mid-frame interruption, server restart, automatic reconnect, and sync.
+
+Both peers must be upgraded together: protocol v1 is rejected explicitly rather than interpreted
+as the new resume exchange. Rerunning the same upload or sync command also resumes saved state.
+Request IDs may change between attempts. Add `--retries 0` to disable automatic retries, or
+`--retries 5` for the maximum. Authentication rejection and protocol validation errors are not retried.
 
 ## Build on Ubuntu or Debian
 
@@ -163,6 +197,8 @@ ctest --test-dir build --output-on-failure
 - Frame and buffer sizes are bounded before allocation or dispatch.
 - Upload filenames are basenames, file chunks are contiguous, and incomplete files are never
   exposed at their final path.
+- The first chunk may explicitly restart an offered partial at offset zero; later chunks must
+  remain contiguous. Source files should not change during an operation.
 - Directory synchronization never follows symlinks and never deletes server-only files.
 - The accept queue and worker count are bounded; overload closes excess sessions instead of
   consuming memory without limit.
@@ -184,3 +220,31 @@ operating-system credential facility.
 
 See [`docs/protocol.md`](docs/protocol.md) for the wire-format and transfer-state specification.
 
+## Validate, build for release, and install
+
+```bash
+cmake --preset release
+cmake --build --preset release
+ctest --preset release --verbose
+python3 scripts/verify_resume.py --build-dir build/release
+cmake --install build/release --prefix "$HOME/.local"
+```
+
+The Python standard-library demo starts its own loopback server on an ephemeral port, generates
+a temporary test secret, verifies SHA-256 equality, and cleans up its own temporary files. It
+also prints an actual local 1 MiB upload measurement including hashing, authentication and fsync;
+this is not a WAN or scalability benchmark. No secret or pre-existing destination is used.
+
+## Deliberate limits and future work
+
+This MVP is one-way push synchronization, preserving server-only files. Downloads, deletion,
+filesystem watching, TLS, per-path write concurrency, and multi-user authorization are not
+implemented. A declared download message type is reserved, not a supported command.
+The worker pool is bounded, but sockets have no idle deadlines: a silent authenticated peer can
+occupy a worker or the destination lock until disconnect or shutdown. The destination root must
+be controlled by the server user; hostile local filesystem mutation is outside the threat model.
+
+Incomplete identities from changed source files remain until an operator removes their internal
+state with the server stopped. Storage budgets bound retained state; they are not automatic garbage
+collection. Resume verifies CRC-32 to detect accidental corruption, not malicious collisions.
+Successful files are atomically replaced individually; an entire directory sync is not a transaction.

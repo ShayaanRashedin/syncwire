@@ -179,7 +179,10 @@ def main():
         try:
             server, port = start_server(build / "syncwire-server", destination, env)
             interrupt_upload(port, secret.encode(), data, b"resumed.bin")
-            stop_server(server)
+            # Kill only the child created above: no graceful checkpoint/shutdown callback.
+            server.kill()
+            server.communicate(timeout=5)
+            assert server.returncode == -9
             server = None
             assert not (destination / "resumed.bin").exists()
             saved = list((destination / ".syncwire-partials").glob("*.part"))
@@ -188,7 +191,7 @@ def main():
             output = run_client(build / "syncwire-client", port, env, "upload", source, "resumed.bin", 200)
             assert "resumed 131072 bytes, sent 917504 bytes" in output, output
             assert hashlib.sha256((destination / "resumed.bin").read_bytes()).digest() == hashlib.sha256(data).digest()
-            print("PASS: restart recovery reused 131072 bytes; final SHA-256 matches")
+            print("PASS: forced-restart recovery reused 131072 bytes; final SHA-256 matches")
 
             test_automatic_retry(build / "syncwire-client", port, env, source)
             assert (destination / "retry.bin").read_bytes() == data

@@ -238,6 +238,72 @@ void test_storage_guards(TestRunner& runner) {
                   "reserved namespace is rejected at any path depth");
 }
 
+void test_client_rejects_bad_offers(TestRunner& runner) {
+    Fixture fixture;
+    if (fixture.root.empty()) { runner.expect(false, "offer fixture opens"); return; }
+    const auto source = fixture.root / "source.bin";
+    write_bytes(source, std::vector<std::byte>(2U, std::byte{1}));
+    for (const auto& offer : {
+             frame(MessageType::TransferReady, 91U, 91U),
+             frame(MessageType::TransferReady, 91U, 91U, encode_transfer_ready({3U, 0U})),
+             frame(MessageType::TransferReady, 91U, 91U, encode_transfer_ready({0U, 1U})),
+             frame(MessageType::TransferResult, 91U, 0U,
+                   encode_transfer_result(TransferResultCode::Success))}) {
+        int fds[2]{};
+        if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds) != 0) {
+            runner.expect(false, "offer sockets open"); return;
+        }
+        UniqueFd client(fds[0]);
+        UniqueFd server(fds[1]);
+        std::jthread worker([&] {
+            static_cast<void>(receive_frame(server.get()));
+            static_cast<void>(send_frame(server.get(), offer));
+            static_cast<void>(::shutdown(server.get(), SHUT_RDWR));
+        });
+        const auto result = send_file(client.get(), source, "result.bin", 91U);
+        worker.join();
+        runner.expect(!result.ok() && result.status != FileTransferStatus::FrameIoError,
+                      "client rejects invalid resume offers and premature success before sending data");
+    }
+}
+
+void test_empty_and_long_filename(TestRunner& runner) {
+    Fixture fixture;
+    if (fixture.root.empty()) { runner.expect(false, "empty-file fixture opens"); return; }
+    const auto source = fixture.root / "empty";
+    const std::vector<std::byte> empty;
+    write_bytes(source, empty);
+    const std::string name(255U, 'a');
+    Session session(fixture.destination);
+    runner.expect(session.authenticate(), "empty-file upload authenticates");
+    const auto result = send_file(session.client.get(), source, name, 92U);
+    session.join();
+    runner.expect(result.ok() && matches(fixture.destination / name, empty) && partials(fixture).empty(),
+                  "zero-byte files and maximum-length filenames commit without a data chunk");
+}
+
+void test_malformed_resume_discards_state(TestRunner& runner) {
+    Fixture fixture;
+    if (fixture.root.empty()) { runner.expect(false, "malformed-resume fixture opens"); return; }
+    const std::vector<std::byte> data(20U, std::byte{0x33});
+    if (!seed_partial(runner, fixture, data, 5U)) { return; }
+    Session session(fixture.destination);
+    runner.expect(session.authenticate(), "malformed-resume connection authenticates");
+    static_cast<void>(send_frame(session.client.get(), frame(MessageType::UploadRequest, 93U, 0U,
+        encode_upload_metadata({"result.bin", data.size(), crc32(data)}))));
+    const auto response = receive_frame(session.client.get());
+    const auto* offered = std::get_if<Frame>(&response);
+    runner.expect(offered && offered->header.message_type == MessageType::TransferReady,
+                  "malformed-resume test receives stored prefix offer");
+    auto bad = encode_header(FrameHeader{});
+    bad[0] = std::byte{0};
+    static_cast<void>(::send(session.client.get(), bad.data(), bad.size(), MSG_NOSIGNAL));
+    session.join();
+    runner.expect(session.result && session.result->frame_io.status == FrameIoStatus::InvalidHeader &&
+                      partials(fixture).empty() && !std::filesystem::exists(fixture.destination / "result.bin"),
+                  "malformed input discards the partial rather than treating it as a resumable disconnect");
+}
+
 void test_ready_codec(TestRunner& runner) {
     const TransferReady ready{0x0102030405060708ULL, 0xAABBCCDDU};
     const auto encoded = encode_transfer_ready(ready);
@@ -263,4 +329,7 @@ void run_resume_tests(TestRunner& runner) {
     test_resume_case(runner, 257U, 2); // Source changed between attempts.
     test_resume_case(runner, 257U, 3); // Oversized partial is restarted safely.
     test_storage_guards(runner);
+    test_client_rejects_bad_offers(runner);
+    test_empty_and_long_filename(runner);
+    test_malformed_resume_discards_state(runner);
 }
