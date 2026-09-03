@@ -9,8 +9,10 @@ project(
 
 option(SYNCWIRE_BUILD_TESTS "Build SyncWire tests" ON)
 find_package(Threads REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 add_library(syncwire_common
+    src/common/authentication.cpp
     src/common/codec.cpp
     src/common/crc32.cpp
     src/common/directory_manifest.cpp
@@ -30,7 +32,7 @@ add_library(syncwire_common
 add_library(SyncWire::common ALIAS syncwire_common)
 
 target_compile_features(syncwire_common PUBLIC cxx_std_20)
-target_link_libraries(syncwire_common PUBLIC Threads::Threads)
+target_link_libraries(syncwire_common PUBLIC Threads::Threads OpenSSL::Crypto)
 target_include_directories(syncwire_common
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -77,6 +79,7 @@ if(SYNCWIRE_BUILD_TESTS)
 
     add_executable(syncwire_unit_tests
         tests/unit/test_main.cpp
+        tests/unit/authentication_tests.cpp
         tests/unit/protocol_tests.cpp
         tests/unit/frame_parser_tests.cpp
         tests/unit/unique_fd_tests.cpp

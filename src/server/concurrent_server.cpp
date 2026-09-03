@@ -32,6 +32,8 @@ inline constexpr int kEpollEventCapacity = 8;
 
 [[nodiscard]] bool valid_config(const ConcurrentServerConfig& config) {
     return !config.bind_address.empty() && !config.destination_root.empty() &&
+           protocol::is_valid_authentication_secret(
+               config.authentication_secret) &&
            config.worker_count > 0U &&
            config.worker_count <= kMaximumWorkerCount &&
            config.max_pending_connections > 0U &&
@@ -110,7 +112,10 @@ struct ConcurrentServer::Impl {
                 active_connections.insert(client.get());
             }
             auto result =
-                serve_client_session(client.get(), config.destination_root, &destination_mutex);
+                serve_client_session(client.get(),
+                                     config.destination_root,
+                                     config.authentication_secret,
+                                     &destination_mutex);
             {
                 const std::scoped_lock lock(active_mutex);
                 active_connections.erase(client.get());

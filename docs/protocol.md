@@ -47,8 +47,36 @@ format because it may contain padding and uses host byte order.
 | `0x33` | `SYNC_RESULT` | Server reports post-upload verification status |
 | `0x7f` | `ERROR` | Reports a structured protocol/operation error |
 
-Authentication and download payloads remain reserved for later slices. The upload payloads and
-ordering rules are specified below.
+Download payloads remain reserved for a later slice. Authentication and upload ordering rules
+are specified below.
+
+## Authentication exchange
+
+Every server session authenticates before the client sends its PING, upload, or sync operation.
+Authentication frames use `request_id = 0` and `transfer_id = 0`.
+
+1. Server generates 32 random bytes with OpenSSL `RAND_bytes()` and sends them as
+   `AUTH_CHALLENGE`.
+2. Client generates its own 32-byte nonce and calculates HMAC-SHA256 over the ASCII domain
+   string `SyncWire-v1-client-proof`, the server nonce, and the client nonce. The configured
+   `SYNCWIRE_PSK` bytes are the HMAC key.
+3. Client sends its 32-byte nonce followed by the 32-byte digest as `AUTH_PROOF`.
+4. Server independently calculates the client digest and compares it with `CRYPTO_memcmp()`.
+5. When accepted, the server calculates HMAC-SHA256 over
+   `SyncWire-v1-server-proof || server-nonce || client-nonce || client-proof`.
+6. Server sends `AUTH_RESULT`. Rejection is the one byte `1`; acceptance is the byte `0`
+   followed by the 32-byte server proof.
+7. Client calculates and constant-time verifies the server proof before sending an operation.
+
+Secrets shorter than 16 bytes or longer than 1,024 bytes are rejected locally. A malformed
+challenge, proof, or result terminates the connection. The secret is never included in a frame,
+CLI argument, or log message.
+
+Fresh 256-bit nonces from both peers prevent capture-and-replay of either proof. The distinct
+proof domains provide mutual peer authentication and prevent reflecting a client proof as a
+server proof. The handshake does not encrypt subsequent frames, hide metadata, or provide
+forward secrecy. The reference server therefore remains bound to `127.0.0.1` until a
+transport-encryption layer is added.
 
 ## PING/PONG exchange
 
@@ -56,8 +84,8 @@ ordering rules are specified below.
 `request_id`; the server returns the same value in its `PONG`. A zero request ID, nonempty payload,
 nonzero transfer ID, wrong message type, or mismatched response ID makes the exchange invalid.
 
-Each accepted TCP connection carries one complete PING, upload, or directory-sync session. The
-server may serve many independent connections concurrently.
+Each authenticated TCP connection carries one complete PING, upload, or directory-sync session.
+The server may serve many independent connections concurrently.
 
 ## Concurrent server runtime
 
@@ -147,8 +175,9 @@ The payload is a one-byte result code:
 | `7` | Declared and received sizes differ |
 | `8` | CRC-32 mismatch |
 
-CRC-32 detects accidental transfer corruption; it is not an authentication mechanism. A later
-authenticated protocol must use a cryptographic message authentication code.
+CRC-32 detects accidental transfer corruption; it is not a cryptographic integrity mechanism.
+The session handshake authenticates the peer with HMAC-SHA256, but TLS is still required to
+cryptographically protect every subsequent frame from an active network attacker.
 
 ### Atomic destination commit
 

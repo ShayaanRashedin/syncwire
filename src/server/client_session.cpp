@@ -25,7 +25,17 @@ template <typename Operation>
 ClientSessionResult serve_client_session(
     const int client_fd,
     const std::filesystem::path& destination_root,
+    const std::string_view authentication_secret,
     std::mutex* const destination_mutex) {
+    auto authentication =
+        protocol::authenticate_server(client_fd, authentication_secret);
+    if (!authentication.ok()) {
+        return ClientSessionResult{
+            .status = SessionStatus::AuthenticationError,
+            .authentication = std::move(authentication),
+        };
+    }
+
     const auto received = protocol::receive_frame(client_fd);
     if (const auto* error = std::get_if<protocol::FrameIoResult>(&received);
         error != nullptr) {
@@ -107,6 +117,8 @@ std::string_view session_status_message(const SessionStatus status) noexcept {
     switch (status) {
     case SessionStatus::Success:
         return "session completed";
+    case SessionStatus::AuthenticationError:
+        return "session authentication failed";
     case SessionStatus::FrameIoError:
         return "session frame I/O failed";
     case SessionStatus::PingError:
