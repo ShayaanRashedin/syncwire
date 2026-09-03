@@ -101,7 +101,7 @@ find_record(const syncwire::FileManifest& files, const std::string_view path) {
 
 struct SyncPairResult {
     syncwire::protocol::DirectorySyncResult client;
-    std::optional<syncwire::protocol::DirectorySyncResult> server;
+    std::optional<syncwire::protocol::DirectorySyncResult> server{};
 };
 
 [[nodiscard]] SyncPairResult run_sync_pair(const std::filesystem::path& source,
@@ -304,3 +304,4 @@ void run_directory_sync_tests(TestRunner& runner) {
     test_symlink_parent_cannot_escape_root(runner);
     test_invalid_manifest_order(runner);
 }
+

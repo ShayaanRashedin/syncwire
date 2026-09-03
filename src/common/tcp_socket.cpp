@@ -43,7 +43,7 @@ TcpSocketResult listen_ipv4(const std::string_view address, const std::uint16_t 
         return TcpError{.operation = TcpOperation::Listen, .system_error = errno};
     }
 
-    return std::move(listener);
+    return listener;
 }
 
 TcpSocketResult connect_ipv4(const std::string_view address, const std::uint16_t port) {
@@ -67,7 +67,7 @@ TcpSocketResult connect_ipv4(const std::string_view address, const std::uint16_t
     if (::connect(socket.get(), reinterpret_cast<const sockaddr*>(&endpoint), sizeof(endpoint)) < 0) {
         return TcpError{.operation = TcpOperation::Connect, .system_error = errno};
     }
-    return std::move(socket);
+    return socket;
 }
 
 TcpSocketResult accept_one(const int listener_fd) noexcept {

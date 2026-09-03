@@ -36,8 +36,8 @@ enum class DirectorySyncStatus {
 
 struct DirectorySyncResult {
     DirectorySyncStatus status{DirectorySyncStatus::Success};
-    FrameIoResult frame_io;
-    FileTransferResult file_transfer;
+    FrameIoResult frame_io{};
+    FileTransferResult file_transfer{};
     std::optional<DirectoryScanError> scan_error{};
     std::optional<SyncCodecError> codec_error{};
     std::size_t planned_uploads{0U};
@@ -68,3 +68,4 @@ receive_directory_sync(int client_fd,
 [[nodiscard]] std::string_view directory_sync_status_message(DirectorySyncStatus status) noexcept;
 
 } // namespace syncwire::protocol
+
